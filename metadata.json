@@ -1,0 +1,14 @@
+
+{
+  "name": "Ajay Construction Agent",
+  "short_name": "AjayConst",
+  "description": "Premium 2026 construction estimation and engineering consultation for Hyderabad real estate agents.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1E3A8A",
+  "background_color": "#F9FBFF",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
