@@ -14,6 +14,13 @@ export type HyderabadArea =
 export type QualityGrade = 'Budget' | 'Standard' | 'Premium' | 'Luxury';
 export type ProjectSubtype = 'House' | 'Flat';
 
+export interface UserData {
+  name: string;
+  phone: string;
+  email: string;
+  company?: string;
+}
+
 export interface MaterialItem {
   name: string;
   quantity: string;
