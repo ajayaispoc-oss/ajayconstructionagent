@@ -56,11 +56,53 @@ export const CONSTRUCTION_TASKS: TaskConfig[] = [
     id: 'painting',
     title: 'Paint & Finishes',
     icon: '🎨',
-    description: 'Wall preparation, primer, and luxury paint application.',
+    description: 'Wall preparation, primer, and professional paint application from top brands.',
     fields: [
       ...COMMON_FIELDS,
       { name: 'area', label: 'Wall Surface Area (sq ft)', type: 'number', placeholder: 'e.g., 1200' },
-      { name: 'brandPreference', label: 'Paint Range', type: 'select', placeholder: 'Select range', options: ['Royale Luxury', 'Apex Ultima', 'Silk Glamor', 'Budget Distemper'] }
+      { 
+        name: 'paint_company', 
+        label: 'Paint Brand', 
+        type: 'select', 
+        placeholder: 'Select Brand', 
+        options: ['Asian Paints', 'Birla Opus', 'Berger Paints', 'Dulux'] 
+      },
+      { 
+        name: 'paint_type_asian', 
+        label: 'Asian Paints Range', 
+        type: 'select', 
+        placeholder: 'Select Range', 
+        options: ['Royale Luxury Emulsion', 'Apex Ultima Protective', 'Tractor Emulsion (Budget)', 'Nilaya Wallcoverings'],
+        dependsOn: 'paint_company',
+        showIfValue: 'Asian Paints'
+      },
+      { 
+        name: 'paint_type_birla', 
+        label: 'Birla Opus Range', 
+        type: 'select', 
+        placeholder: 'Select Range', 
+        options: ['Allure Luxury', 'Prime High-Gloss', 'Calista Interior', 'Style Distemper'],
+        dependsOn: 'paint_company',
+        showIfValue: 'Birla Opus'
+      },
+      { 
+        name: 'paint_type_berger', 
+        label: 'Berger Paints Range', 
+        type: 'select', 
+        placeholder: 'Select Range', 
+        options: ['Silk Glamor', 'Weathercoat Long Life', 'Luxol High Gloss', 'Bison Emulsion'],
+        dependsOn: 'paint_company',
+        showIfValue: 'Berger Paints'
+      },
+      { 
+        name: 'paint_type_dulux', 
+        label: 'Dulux Range', 
+        type: 'select', 
+        placeholder: 'Select Range', 
+        options: ['Velvet Touch', 'Weathershield Max', 'Promise Emulsion', 'Supercover'],
+        dependsOn: 'paint_company',
+        showIfValue: 'Dulux'
+      }
     ]
   },
   {

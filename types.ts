@@ -45,6 +45,7 @@ export interface EstimationResult {
   expertTips: string;
   visualPrompt: string;
   timeline?: TimelineEvent[];
+  paintCodeSuggestions?: string[]; // New field for paint codes
 }
 
 export interface TaskField {
