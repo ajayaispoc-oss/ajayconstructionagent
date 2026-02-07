@@ -2,6 +2,7 @@
 import { TaskConfig, TaskField } from './types';
 
 const COMMON_FIELDS: TaskField[] = [
+  { name: 'clientPhone', label: 'Client Mobile Number', type: 'text', placeholder: 'e.g., 97031XXXXX' },
   { name: 'area_location', label: 'Hyderabad Sub-Zone', type: 'select', placeholder: 'Select locality', options: ['Madhapur', 'Gachibowli', 'Kukatpally', 'Jubilee Hills', 'Banjara Hills', 'Manikonda', 'Kondapur', 'Ameerpet', 'Uppal', 'Secunderabad'] },
   { name: 'quality_grade', label: 'Finishing Grade', type: 'select', placeholder: 'Select grade', options: ['Budget (Basic)', 'Standard (Regular)', 'Premium (Branded)', 'Luxury (High-end)'] }
 ];

@@ -1,8 +1,11 @@
+
 {
-  "name": "Ajay Constructions Python",
-  "short_name": "AjayConstPy",
-  "description": "Premium 2026 construction estimation and engineering portal for Hyderabad, now in Python.",
+  "name": "Ajay Constructions",
+  "short_name": "AjayConst",
+  "description": "Premium 2026 construction estimation and engineering portal for Hyderabad.",
   "theme_color": "#1E3A8A",
   "background_color": "#F9FBFF",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "geolocation"
+  ]
 }
