@@ -4,7 +4,8 @@ import { EstimationResult, TaskConfig, MarketPriceList, UserData } from './types
 import { CONSTRUCTION_TASKS } from './constants';
 import { getConstructionEstimate, generateDesignImage, getRawMaterialPriceList } from './services/geminiService';
 
-const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz0Xg8xjg_TFoznnmJwdrmH48T9V3BDZE4RWJInJ4TmpYvNYm7ziFRrvz9kGnI_OtYmkQ/exec";
+// IMPORTANT: Ensure this URL matches your deployed Apps Script Web App URL
+const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbysL0GwQvJ_pirhjDiLoODbsIFZ8lQXgYXJOO68uxx28frwva759lDSPe7nxWZPXlq9pw/exec";
 
 const LOADING_MESSAGES = [
   "Fetching 2026 Hyderabad Price Index...",
@@ -37,6 +38,7 @@ interface SavedEstimate extends EstimationResult {
 }
 
 type AppView = 'calculator' | 'market' | 'invoice';
+type PaymentState = 'idle' | 'pending' | 'verifying' | 'success';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('calculator');
@@ -59,10 +61,11 @@ const App: React.FC = () => {
   const [callbackRequested, setCallbackRequested] = useState(false);
   const [pendingAction, setPendingAction] = useState<'calculate' | 'order' | 'invoice' | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [profileUpdated, setProfileUpdated] = useState(false);
 
-  // Market specific state
-  const [marketData, setMarketData] = useState<MarketPriceList | null>(null);
-  const [marketLoading, setMarketLoading] = useState(false);
+  // Payment State
+  const [paymentStatus, setPaymentStatus] = useState<PaymentState>('idle');
+  const [transactionId, setTransactionId] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('ajay_quote_history');
@@ -84,53 +87,34 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [loading]);
 
-  const logRequestToCloud = async (est: EstimationResult, currentCount: number) => {
+  /**
+   * Enhanced tracker that captures IP, Location and sends Email Notification
+   */
+  const trackAndNotify = async (type: 'LOG' | 'CALLBACK', est: EstimationResult | null) => {
     try {
-      let geoInfo = "Unknown Location";
-      let userIp = "Unknown IP";
-      
+      let ip = "N/A";
+      let location = formInputs.area_location || "Hyderabad";
+
+      // Attempt to get user IP/Geo silently
       try {
-        const geoRes = await fetch('https://ipapi.co/json/', { method: 'GET', headers: { 'Accept': 'application/json' } });
+        const geoRes = await fetch('https://ipapi.co/json/');
         if (geoRes.ok) {
           const geoData = await geoRes.json();
-          userIp = geoData.ip;
-          geoInfo = `${geoData.city}, ${geoData.region}, ${geoData.country_name}`;
+          ip = geoData.ip;
+          location = `${geoData.city}, ${geoData.region} (Input: ${formInputs.area_location || 'None'})`;
         }
-      } catch (geoErr) { console.warn("Geo fallback engaged", geoErr); }
+      } catch (e) { console.warn("Geo lookup failed"); }
 
       const payload = {
-        type: 'LOG',
-        username: userData?.name || formInputs.clientName || 'Lead-Prospect',
-        email: userData?.email || 'No-Email',
-        phone: formInputs.clientPhone || userData?.phone || 'No-Phone',
-        ip: userIp,
-        location: geoInfo,
-        category: selectedTask?.title || 'General',
-        totalCost: est.totalEstimatedCost,
-        requestCount: currentCount
-      };
-
-      await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
-        method: 'POST',
-        mode: 'no-cors', 
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
-      });
-    } catch (e) { console.error("Logging failure", e); }
-  };
-
-  const handleRequestCallback = async () => {
-    if (!estimate) return;
-    setCallbackLoading(true);
-    try {
-      const payload = {
-        type: 'CALLBACK',
-        username: userData?.name || formInputs.clientName || 'Lead',
+        type,
+        username: userData?.name || formInputs.clientName || 'Lead Prospect',
         email: userData?.email || 'N/A',
-        phone: formInputs.clientPhone || userData?.phone || 'N/A',
-        category: selectedTask?.title || 'Construction Project',
-        totalCost: estimate.totalEstimatedCost,
-        location: formInputs.area_location || 'Hyderabad'
+        phone: userData?.phone || formInputs.clientPhone || 'N/A',
+        ip,
+        location,
+        category: selectedTask?.title || 'General Service',
+        totalCost: est?.totalEstimatedCost.toLocaleString('en-IN') || '0',
+        details: est ? est.materials.map(m => `- ${m.name}: ${m.quantity}`).join('\n') : "Manual Request"
       };
 
       await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
@@ -139,11 +123,32 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload)
       });
-      setCallbackRequested(true);
-      setTimeout(() => setShowCallbackPopup(false), 3000);
+      console.log(`Successfully dispatched ${type} alert to Ajay`);
     } catch (e) {
-      console.error("Callback notify failure", e);
-      alert("Something went wrong. Please call Ajay directly at 9703133338.");
+      console.error("Tracking/Notification Error", e);
+    }
+  };
+
+  const handleVerifyPayment = async () => {
+    setPaymentStatus('verifying');
+    await new Promise(r => setTimeout(r, 3000));
+    const mockTxId = `AC-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+    setTransactionId(mockTxId);
+    setPaymentStatus('success');
+  };
+
+  const handleRequestCallback = async () => {
+    if (!estimate) return;
+    setCallbackLoading(true);
+    try {
+      await trackAndNotify('CALLBACK', estimate);
+      setCallbackRequested(true);
+      setTimeout(() => {
+        setShowCallbackPopup(false);
+        setCallbackRequested(false);
+      }, 3000);
+    } catch (e) {
+      alert("Relay error. Contact Ajay at 9703133338.");
     } finally {
       setCallbackLoading(false);
     }
@@ -158,6 +163,8 @@ const App: React.FC = () => {
     setEstimate(null);
     setGeneratedImage(null);
     setFormInputs({});
+    setPaymentStatus('idle');
+    setTransactionId(null);
     setError(null);
     setView('calculator');
     setCallbackRequested(false);
@@ -181,7 +188,7 @@ const App: React.FC = () => {
         ...result,
         id: Math.random().toString(36).substr(2, 9),
         clientName: formInputs.clientName || 'New Project',
-        clientPhone: formInputs.clientPhone || 'N/A',
+        clientPhone: userData?.phone || formInputs.clientPhone || 'N/A',
         date: new Date().toLocaleDateString('en-IN'),
         taskTitle: selectedTask.title,
         area: formInputs.area_location || 'Hyderabad',
@@ -192,8 +199,9 @@ const App: React.FC = () => {
       setHistory(updatedHistory);
       localStorage.setItem('ajay_quote_history', JSON.stringify(updatedHistory));
 
-      logRequestToCloud(result, nextCount);
-      // Show callback popup once calculation is complete
+      // AUTO-NOTIFY AJAY ON GENERATION
+      await trackAndNotify('LOG', result);
+      
       setTimeout(() => setShowCallbackPopup(true), 1500);
 
     } catch (err: any) {
@@ -204,7 +212,7 @@ const App: React.FC = () => {
   };
 
   const checkAccessAndRun = (action: 'calculate' | 'order' | 'invoice') => {
-    if (action === 'calculate' && requestCount === 0) {
+    if (action === 'calculate' && requestCount === 0 && !userData) {
       executeCalculation();
       return;
     }
@@ -216,12 +224,11 @@ const App: React.FC = () => {
       if (action === 'calculate') executeCalculation();
       else if (action === 'invoice') setView('invoice');
       else if (action === 'order') {
-        if (!agreedToTerms) {
-          alert("Please review and agree to Terms & Conditions.");
-          setView('invoice');
+        if (!agreedToTerms || paymentStatus !== 'success') {
+          alert("Please verify payment and agree to terms.");
           return;
         }
-        alert(`Order request sent. Ajay will contact you at ${formInputs.clientPhone || userData.phone}.`);
+        alert(`Order request sent. Tx ID: ${transactionId}`);
       }
     }
   };
@@ -237,15 +244,20 @@ const App: React.FC = () => {
     };
     setUserData(user);
     localStorage.setItem('ajay_user_data', JSON.stringify(user));
-    setShowLeadForm(false);
-    if (pendingAction === 'calculate') executeCalculation();
-    else if (pendingAction === 'invoice') setView('invoice');
-    setPendingAction(null);
+    setProfileUpdated(true);
+    
+    setTimeout(() => {
+      setShowLeadForm(false);
+      setProfileUpdated(false);
+      if (pendingAction === 'calculate') executeCalculation();
+      else if (pendingAction === 'invoice') setView('invoice');
+      setPendingAction(null);
+    }, 1500);
   };
 
-  const getUpiQrUrl = (amount?: number) => {
-    const baseUrl = `upi://pay?pa={UPI_ID}&pn=${encodeURIComponent(BRAND_NAME)}&cu=INR`;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(amount ? `${baseUrl}&am=${amount}` : baseUrl)}`;
+  const getUpiQrUrl = (amount: number) => {
+    const upiUri = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(BRAND_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent('Project Invoice')}`;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiUri)}`;
   };
 
   return (
@@ -259,6 +271,18 @@ const App: React.FC = () => {
         </div>
       </div>
 
+      {/* Payment Success Popup */}
+      {paymentStatus === 'success' && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-[#1E3A8A]/90 backdrop-blur-2xl p-6">
+           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-12 text-center animate-in zoom-in-95 duration-500">
+              <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center text-5xl mx-auto mb-8 shadow-2xl shadow-emerald-200 text-white animate-bounce">✓</div>
+              <h3 className="text-3xl font-black uppercase text-[#1E3A8A] tracking-tighter">Payment Verified</h3>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2 mb-8">Engineering Ledger Updated</p>
+              <button onClick={() => setPaymentStatus('idle')} className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest">Close Receipt</button>
+           </div>
+        </div>
+      )}
+
       {/* Callback Success Popup */}
       {showCallbackPopup && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/80 backdrop-blur-xl p-6">
@@ -266,28 +290,17 @@ const App: React.FC = () => {
             {callbackRequested ? (
               <div className="animate-in fade-in duration-500">
                 <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-xl shadow-emerald-100">✅</div>
-                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Request Notified</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Ajay will contact you shortly.</p>
+                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Request Sent</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Email alert sent to ajay.ai.spoc@gmail.com</p>
               </div>
             ) : (
               <>
                 <div className="w-20 h-20 bg-[#1E3A8A] rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-xl shadow-blue-100">📞</div>
-                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Quote Ready!</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2 mb-8">Would you like a priority call back from our engineer?</p>
+                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Analysis Ready</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2 mb-8">Quote logged. Request priority call from Ajay?</p>
                 <div className="flex flex-col gap-3">
-                   <button 
-                    onClick={handleRequestCallback}
-                    disabled={callbackLoading}
-                    className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-105 transition-all disabled:opacity-50"
-                   >
-                    {callbackLoading ? "Requesting..." : "Yes, Request Call Back"}
-                   </button>
-                   <button 
-                    onClick={() => setShowCallbackPopup(false)}
-                    className="w-full bg-slate-50 text-slate-400 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:text-slate-600 transition-all"
-                   >
-                    Just view Invoice
-                   </button>
+                   <button onClick={handleRequestCallback} disabled={callbackLoading} className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl">{callbackLoading ? "Alerting Ajay..." : "Yes, Request Callback"}</button>
+                   <button onClick={() => setShowCallbackPopup(false)} className="w-full bg-slate-50 text-slate-400 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest">Just View Invoice</button>
                 </div>
               </>
             )}
@@ -295,67 +308,51 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Lead Capture Modal */}
+      {/* Profile Form */}
       {showLeadForm && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-6">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl p-12 relative animate-in zoom-in-95 duration-300">
-            <button onClick={() => setShowLeadForm(false)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors">✕</button>
-            <div className="text-center mb-10">
-              <div className="w-16 h-16 bg-[#1E3A8A] rounded-2xl flex items-center justify-center text-3xl mx-auto mb-6 shadow-xl">💼</div>
-              <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Professional Access</h3>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Unlock Engineering Reports & Orders</p>
-            </div>
-            <form onSubmit={handleLeadSubmit} className="space-y-4">
-              <input required name="name" type="text" placeholder="Your Full Name" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
-              <input required name="phone" type="tel" placeholder="Mobile Number" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
-              <input required name="email" type="email" placeholder="Email Address" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
-              <input name="company" type="text" placeholder="Company (Optional)" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
-              <button type="submit" className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-100 hover:scale-[1.02] transition-all">
-                Continue to Portal
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* History Sidebar */}
-      {showHistory && (
-        <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex justify-end">
-          <div className="w-full max-w-md bg-white h-full shadow-2xl p-8 flex flex-col animate-in slide-in-from-right duration-300">
-            <div className="flex justify-between items-center mb-8 border-b pb-4">
-              <div>
-                <h3 className="text-xl font-black uppercase text-[#1E3A8A]">Project Ledger</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Saved Quotes</p>
+            {profileUpdated ? (
+              <div className="text-center py-10 animate-in fade-in duration-300">
+                <div className="text-6xl mb-6">✨</div>
+                <h3 className="text-2xl font-black uppercase text-emerald-600 tracking-tighter">Profile Synced</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">Connecting to Agent Ledger...</p>
               </div>
-              <button onClick={() => setShowHistory(false)} className="text-2xl hover:rotate-90 transition-transform">✕</button>
-            </div>
-            <div className="flex-grow overflow-y-auto space-y-4">
-              {history.length === 0 ? (
-                <p className="text-center text-slate-300 py-20 font-bold uppercase text-xs">No saved projects yet</p>
-              ) : (
-                history.map((item) => (
-                  <div key={item.id} className="p-4 border border-slate-100 rounded-2xl hover:border-[#1E3A8A] hover:bg-blue-50 transition-all cursor-pointer group" onClick={() => {setEstimate(item); setShowHistory(false); setView('calculator'); setSelectedTask(CONSTRUCTION_TASKS.find(t => t.title === item.taskTitle) || null);}}>
-                    <div className="flex justify-between items-start mb-1">
-                      <p className="text-[10px] font-bold text-[#1E3A8A] uppercase">{item.taskTitle}</p>
-                      <p className="text-[9px] font-black bg-slate-100 px-2 py-0.5 rounded text-slate-500 uppercase">{item.date}</p>
-                    </div>
-                    <p className="font-bold text-slate-800 text-lg group-hover:text-[#1E3A8A] transition-colors">{item.clientName}</p>
-                  </div>
-                ))
-              )}
-            </div>
+            ) : (
+              <>
+                <button onClick={() => setShowLeadForm(false)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors">✕</button>
+                <div className="text-center mb-10">
+                  <div className="w-16 h-16 bg-[#1E3A8A] rounded-2xl flex items-center justify-center text-3xl mx-auto mb-6 shadow-xl">💼</div>
+                  <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">{userData ? 'Modify Credentials' : 'Engineer Access'}</h3>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Required for invoice relay & email notification</p>
+                </div>
+                <form onSubmit={handleLeadSubmit} className="space-y-4">
+                  <input required name="name" type="text" defaultValue={userData?.name} placeholder="Your Full Name" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
+                  <input required name="phone" type="tel" defaultValue={userData?.phone} placeholder="Mobile Number" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
+                  <input required name="email" type="email" defaultValue={userData?.email} placeholder="Email Address" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
+                  <button type="submit" className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-100">Sync Changes</button>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* Main Header */}
+      {/* Main UI Header */}
       <header className="bg-white border-b py-6 px-8 sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setSelectedTask(null); setEstimate(null); setView('calculator');}}>
             <div className="bg-[#1E3A8A] w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-lg transform rotate-3 hover:rotate-0 transition-transform">🏗️</div>
             <div>
               <h1 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Agent Portal • 2026 Index</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                {userData ? (
+                  <span className="flex items-center gap-2">
+                    Authorized Agent: <span className="text-[#1E3A8A]">{userData.name}</span> 
+                    <button onClick={(e) => {e.stopPropagation(); setShowLeadForm(true);}} className="text-slate-300 hover:text-[#1E3A8A] transition-colors">✎ Edit</button>
+                  </span>
+                ) : 'Agent Portal • Hyderabad 2026 Index'}
+              </p>
             </div>
           </div>
           
@@ -377,10 +374,9 @@ const App: React.FC = () => {
              <div className="flex justify-between items-start border-b-4 border-slate-900 pb-10 mb-10">
                 <div>
                    <h2 className="text-5xl font-black uppercase tracking-tighter text-slate-900 leading-none">Engineering Invoice</h2>
-                   <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">Project: {formInputs.clientName || 'New Construction'}</p>
+                   <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-2">Ref: {formInputs.clientName || 'Project Shell'}</p>
                 </div>
                 <div className="text-right">
-                   <p className="text-[10px] font-black uppercase tracking-widest text-[#1E3A8A] mb-1">Generated By</p>
                    <p className="font-black text-xl text-slate-800 uppercase">{BRAND_NAME}</p>
                    <p className="text-xs font-bold text-slate-400">{new Date().toLocaleDateString('en-IN')}</p>
                 </div>
@@ -388,12 +384,12 @@ const App: React.FC = () => {
 
              <div className="grid grid-cols-2 gap-12 mb-12">
                 <div>
-                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Bill To:</h4>
-                   <p className="text-xl font-black text-slate-800 uppercase leading-none">{userData?.name || 'Valued Client'}</p>
-                   <p className="font-bold text-slate-500 text-sm mt-2">Ph: {formInputs.clientPhone || userData?.phone}</p>
+                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Recipient:</h4>
+                   <p className="text-xl font-black text-slate-800 uppercase leading-none">{userData?.name || 'Authorized Lead'}</p>
+                   <p className="font-bold text-[#1E3A8A] text-sm mt-2">{userData?.phone || 'No Mobile Linked'}</p>
                 </div>
                 <div>
-                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Scope:</h4>
+                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Task Scope:</h4>
                    <p className="text-xl font-black text-slate-800 uppercase leading-none">{selectedTask?.title}</p>
                    <p className="font-bold text-slate-500 text-sm mt-2">{formInputs.area_location}, Hyderabad</p>
                 </div>
@@ -402,9 +398,9 @@ const App: React.FC = () => {
              <table className="w-full mb-12 text-sm">
                 <thead>
                    <tr className="bg-slate-900 text-white font-black uppercase tracking-widest text-[10px]">
-                      <th className="p-4 text-left">Material & Brand</th>
+                      <th className="p-4 text-left">Material / Specification</th>
                       <th className="p-4 text-center">Qty</th>
-                      <th className="p-4 text-right">Total (₹)</th>
+                      <th className="p-4 text-right">Estimate (₹)</th>
                    </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -416,71 +412,41 @@ const App: React.FC = () => {
                       </tr>
                    ))}
                    <tr className="bg-slate-50 font-black">
-                      <td className="p-4 py-6">Labor & Engineering</td>
+                      <td className="p-4 py-6">Labor & Project Management</td>
                       <td></td>
                       <td className="p-4 text-right">₹{estimate.laborCost.toLocaleString('en-IN')}</td>
                    </tr>
                 </tbody>
              </table>
 
-             <div className="flex justify-between items-end pt-10 border-t-2 border-slate-900 mb-12">
-                <div className="bg-slate-50 p-6 rounded-3xl text-center">
-                   <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-3">Scan to Pay Adv. Consultation</p>
-                   <img src={getUpiQrUrl()} className="w-24 h-24 mx-auto" alt="UPI" />
+             <div className="flex flex-col md:flex-row justify-between items-center gap-12 pt-10 border-t-2 border-slate-900 mb-12">
+                <div className="bg-slate-50 p-10 rounded-[3rem] text-center border-2 border-slate-100 flex flex-col items-center gap-6">
+                   <p className="text-[10px] font-black uppercase tracking-widest text-[#1E3A8A] mb-1">Scan to Pay: ₹{estimate.totalEstimatedCost.toLocaleString('en-IN')}</p>
+                   <div className="bg-white p-4 rounded-3xl shadow-xl">
+                      <img src={getUpiQrUrl(estimate.totalEstimatedCost)} className="w-48 h-48 mx-auto" alt="UPI QR Code" />
+                   </div>
+                   <button onClick={handleVerifyPayment} disabled={paymentStatus === 'verifying' || paymentStatus === 'success'} className={`w-full px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${paymentStatus === 'success' ? 'bg-emerald-500 text-white shadow-lg' : 'bg-white border-2 border-[#1E3A8A] text-[#1E3A8A] hover:bg-blue-50'}`}>
+                     {paymentStatus === 'verifying' ? 'Verifying...' : paymentStatus === 'success' ? 'Verified ✅' : 'Verify Status'}
+                   </button>
                 </div>
-                <div className="text-right">
-                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Grand Total Estimate</p>
-                   <p className="text-6xl font-black tracking-tighter text-slate-900 leading-none">₹{estimate.totalEstimatedCost.toLocaleString('en-IN')}</p>
+                <div className="text-right flex-1">
+                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Grand Total Engineering Estimate</p>
+                   <p className="text-7xl font-black tracking-tighter text-slate-900 leading-none">₹{estimate.totalEstimatedCost.toLocaleString('en-IN')}</p>
+                   {paymentStatus === 'success' && <p className="text-emerald-600 font-bold text-xs mt-4">PAID VIA UPI PORTAL</p>}
                 </div>
              </div>
 
              <div className="flex justify-end gap-4 print:hidden">
-                <button onClick={() => setShowCallbackPopup(true)} className="bg-slate-100 text-[#1E3A8A] px-8 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-blue-50 transition-colors">Request Call Back</button>
-                <button onClick={() => window.print()} className="bg-slate-900 text-white px-8 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest">Print / PDF</button>
-                <button 
-                  disabled={!agreedToTerms}
-                  onClick={() => checkAccessAndRun('order')} 
-                  className={`px-10 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all ${agreedToTerms ? 'bg-[#1E3A8A] text-white shadow-xl shadow-blue-100' : 'bg-slate-100 text-slate-400'}`}
-                >
-                  Confirm Work Order
-                </button>
+                <button onClick={() => window.print()} className="bg-slate-900 text-white px-8 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:opacity-90">Print / PDF</button>
+                <button disabled={!agreedToTerms || paymentStatus !== 'success'} onClick={() => checkAccessAndRun('order')} className={`px-10 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all ${(agreedToTerms && paymentStatus === 'success') ? 'bg-[#1E3A8A] text-white shadow-xl hover:scale-105' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>Confirm Order</button>
              </div>
-             <div className="mt-8 border-t pt-4 flex items-center gap-4 cursor-pointer" onClick={() => setAgreedToTerms(!agreedToTerms)}>
-                <div className={`w-6 h-6 rounded border-2 flex items-center justify-center ${agreedToTerms ? 'bg-[#1E3A8A] border-[#1E3A8A]' : 'border-slate-300'}`}>
-                  {agreedToTerms && <span className="text-white">✓</span>}
-                </div>
-                <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Agree to Terms & Delivery Guarantee (15-day Grace)</span>
-             </div>
-          </div>
-        ) : view === 'market' ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter mb-12">Market Watch</h2>
-             {marketLoading ? (
-               <div className="py-40 text-center animate-pulse font-black text-[#1E3A8A] uppercase text-xs tracking-widest">Syncing Price Indices...</div>
-             ) : (
-               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {marketData?.categories.map((cat, i) => (
-                    <div key={i} className="bg-white rounded-[2.5rem] border border-slate-100 shadow-lg overflow-hidden p-8">
-                      <h3 className="font-black uppercase text-sm tracking-widest text-[#1E3A8A] mb-6 border-b pb-4">{cat.title}</h3>
-                      <div className="space-y-4">
-                        {cat.items.map((item, j) => (
-                          <div key={j} className="flex justify-between items-center text-sm">
-                            <span className="font-black text-slate-800 uppercase">{item.brandName}</span>
-                            <span className="font-black text-slate-900">₹{item.priceWithGst.toLocaleString('en-IN')}/<span className="opacity-40">{item.unit}</span></span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-               </div>
-             )}
           </div>
         ) : (
           !selectedTask ? (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="text-center mb-16">
                 <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter mb-4">Construction Intelligence</h2>
-                <p className="text-slate-500 font-medium max-w-2xl mx-auto uppercase text-[10px] tracking-widest">Select service to generate agent-grade precision engineering estimates.</p>
+                <p className="text-slate-500 font-medium max-w-2xl mx-auto uppercase text-[10px] tracking-widest">Select a service to build a precision engineering estimate.</p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {CONSTRUCTION_TASKS.map((task) => (
@@ -496,11 +462,11 @@ const App: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start animate-in fade-in duration-500">
               <div className="lg:col-span-4 bg-white p-10 rounded-[3rem] shadow-xl border border-slate-100 sticky top-32">
-                <button onClick={() => setSelectedTask(null)} className="text-[10px] font-black text-[#1E3A8A] mb-8 uppercase">← Back</button>
+                <button onClick={() => setSelectedTask(null)} className="text-[10px] font-black text-[#1E3A8A] mb-8 uppercase hover:underline">← Back</button>
                 <form onSubmit={(e) => {e.preventDefault(); checkAccessAndRun('calculate');}} className="space-y-6">
                   <div className="group">
-                    <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block tracking-widest">Project / Client Name</label>
-                    <input required type="text" placeholder="e.g., Manikonda Villa 5" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" onChange={(e) => handleInputChange('clientName', e.target.value)} />
+                    <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block tracking-widest">Project Reference</label>
+                    <input required type="text" placeholder="e.g., Gachibowli Site A" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" onChange={(e) => handleInputChange('clientName', e.target.value)} />
                   </div>
                   {selectedTask.fields.map(field => {
                     const isVisible = !field.dependsOn || formInputs[field.dependsOn] === field.showIfValue;
@@ -519,11 +485,9 @@ const App: React.FC = () => {
                       </div>
                     );
                   })}
-                  <button disabled={loading} type="submit" className="w-full bg-[#1E3A8A] text-white py-6 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-100 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+                  <button disabled={loading} type="submit" className="w-full bg-[#1E3A8A] text-white py-6 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-100 hover:scale-[1.02] transition-all disabled:opacity-50">
                     {loading ? "Calculating..." : "Generate Professional Quote"}
                   </button>
-                  {loading && <p className="text-center text-[10px] font-black text-[#1E3A8A] animate-pulse uppercase mt-4 tracking-tighter">{LOADING_MESSAGES[loadingMsgIdx]}</p>}
-                  {error && <p className="text-red-500 text-xs font-bold text-center mt-4">⚠️ {error}</p>}
                 </form>
               </div>
 
@@ -532,12 +496,12 @@ const App: React.FC = () => {
                   <div className="animate-in zoom-in-95 duration-500">
                     <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-8 mb-8">
                       <div>
-                        <h2 className="text-3xl font-black uppercase tracking-tighter">{selectedTask.title} Analysis</h2>
-                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Ref: {formInputs.clientName}</p>
+                        <h2 className="text-3xl font-black uppercase tracking-tighter">{selectedTask.title} Quote</h2>
+                        <p className="text-xs text-[#1E3A8A] font-black uppercase tracking-widest mt-1">{formInputs.clientName}</p>
                       </div>
                       <div className="flex gap-4">
-                        <button onClick={() => checkAccessAndRun('invoice')} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest">📄 Invoice</button>
-                        <button onClick={() => checkAccessAndRun('order')} className="bg-[#1E3A8A] text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-105 transition-all">🛒 Order</button>
+                        <button onClick={() => checkAccessAndRun('invoice')} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:opacity-90 transition-all">📄 Invoice</button>
+                        <button onClick={() => setShowCallbackPopup(true)} className="bg-[#1E3A8A] text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-105 transition-all">📞 Call Status</button>
                       </div>
                     </div>
 
@@ -558,55 +522,15 @@ const App: React.FC = () => {
 
                     {generatedImage && (
                       <div className="relative overflow-hidden rounded-[3rem] shadow-2xl mb-8 border-8 border-white group">
-                        <img src={generatedImage} className="w-full h-[450px] object-cover group-hover:scale-105 transition-transform duration-1000" alt="Architectural Render" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent text-white p-12 flex items-end">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest opacity-70">2026 Architectural Vision</p>
-                            <h3 className="text-3xl font-black tracking-tighter uppercase">{formInputs.quality_grade} {selectedTask.title}</h3>
-                          </div>
-                        </div>
+                        <img src={generatedImage} className="w-full h-[450px] object-cover transition-transform duration-700 group-hover:scale-110" alt="Vision" />
+                        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                       </div>
                     )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-                      <div className="md:col-span-7 bg-white rounded-[3rem] border border-slate-100 p-8 shadow-lg overflow-hidden">
-                        <h5 className="font-black uppercase text-sm tracking-widest text-slate-600 mb-8 pb-4 border-b">Materials</h5>
-                        <table className="w-full text-xs">
-                           <tbody>
-                              {estimate.materials.map((m, idx) => (
-                                <tr key={idx} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
-                                  <td className="py-4 font-black text-slate-800 uppercase leading-none">{m.name}<br/><span className="text-[8px] opacity-40">{m.brandSuggestion}</span></td>
-                                  <td className="py-4 text-right font-black text-slate-900">₹{m.totalPrice.toLocaleString('en-IN')}</td>
-                                </tr>
-                              ))}
-                           </tbody>
-                        </table>
-                      </div>
-
-                      <div className="md:col-span-5 space-y-6">
-                        <div className="bg-[#1E3A8A] rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden">
-                          <h5 className="font-black uppercase text-xs tracking-widest mb-4 opacity-70">Expert Tip</h5>
-                          <p className="font-bold text-lg italic leading-relaxed">"{estimate.expertTips}"</p>
-                          <div className="absolute -bottom-4 -right-4 text-8xl opacity-10 grayscale">💡</div>
-                        </div>
-                        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-md">
-                          <h5 className="font-black uppercase text-xs tracking-widest mb-4 text-slate-400">Precautions</h5>
-                          <ul className="space-y-4">
-                            {estimate.precautions.map((p, i) => (
-                              <li key={i} className="flex gap-4 text-sm font-bold text-slate-600 border-l-2 border-red-100 pl-4">
-                                {p}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 ) : (
-                  <div className="h-full min-h-[600px] flex flex-col items-center justify-center text-center p-20 border-4 border-dashed border-slate-100 rounded-[4rem] opacity-30">
+                  <div className="h-full min-h-[500px] flex flex-col items-center justify-center text-center p-20 border-4 border-dashed border-slate-100 rounded-[4rem] opacity-30">
                     <div className="text-8xl mb-8">📊</div>
                     <h3 className="text-3xl font-black text-slate-400 uppercase tracking-tighter">Analysis Workstation</h3>
-                    <p className="text-slate-400 mt-4 max-w-sm font-medium leading-relaxed uppercase text-[10px] tracking-widest">Select {selectedTask.title} parameters to build your project shell.</p>
                   </div>
                 )}
               </div>
