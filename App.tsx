@@ -7,6 +7,11 @@ import { getConstructionEstimate, generateDesignImage, getRawMaterialPriceList }
 // IMPORTANT: Ensure this URL matches your deployed Apps Script Web App URL
 const GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbysL0GwQvJ_pirhjDiLoODbsIFZ8lQXgYXJOO68uxx28frwva759lDSPe7nxWZPXlq9pw/exec";
 
+const FREE_LIMIT = 3;
+const UPGRADE_PRICE = 399;
+const UPI_ID = "ajay.t.me@icici";
+const BRAND_NAME = "Ajay Constructions";
+
 const LOADING_MESSAGES = [
   "Fetching 2026 Hyderabad Price Index...",
   "Analyzing Troop Bazaar material trends...",
@@ -23,9 +28,6 @@ const MARKET_TICKER = [
   "M-Sand (Cubic Ft): ₹45",
   "AAC Block: ₹4,800/unit"
 ];
-
-const UPI_ID = "ajay.t.me@icici";
-const BRAND_NAME = "Ajay Constructions";
 
 interface SavedEstimate extends EstimationResult {
   id: string;
@@ -52,28 +54,32 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<SavedEstimate[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   
-  // Interaction State
+  // Access Control & Tracking
   const [requestCount, setRequestCount] = useState<number>(0);
+  const [hasFullAccess, setHasFullAccess] = useState<boolean>(false);
+  const [showPaywall, setShowPaywall] = useState(false);
+  
+  // Interaction State
   const [userData, setUserData] = useState<UserData | null>(null);
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [showCallbackPopup, setShowCallbackPopup] = useState(false);
   const [callbackLoading, setCallbackLoading] = useState(false);
   const [callbackRequested, setCallbackRequested] = useState(false);
   const [pendingAction, setPendingAction] = useState<'calculate' | 'order' | 'invoice' | null>(null);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [profileUpdated, setProfileUpdated] = useState(false);
 
-  // Payment State
-  const [paymentStatus, setPaymentStatus] = useState<PaymentState>('idle');
-  const [transactionId, setTransactionId] = useState<string | null>(null);
+  // Upgrade Payment State
+  const [upgradeStatus, setUpgradeStatus] = useState<PaymentState>('idle');
 
   useEffect(() => {
     const saved = localStorage.getItem('ajay_quote_history');
-    const savedCount = localStorage.getItem('ajay_request_count');
+    const savedCount = localStorage.getItem('ajay_request_count') || "0";
     const savedUser = localStorage.getItem('ajay_user_data');
+    const savedAccess = localStorage.getItem('ajay_full_access') === 'true';
     
     if (saved) setHistory(JSON.parse(saved));
-    if (savedCount) setRequestCount(parseInt(savedCount));
+    setRequestCount(parseInt(savedCount));
+    setHasFullAccess(savedAccess);
     if (savedUser) setUserData(JSON.parse(savedUser));
   }, []);
 
@@ -88,33 +94,32 @@ const App: React.FC = () => {
   }, [loading]);
 
   /**
-   * Enhanced tracker that captures IP, Location and sends Email Notification
+   * Tracks user data, IP and notifies Ajay via Google Sheet/Email
    */
-  const trackAndNotify = async (type: 'LOG' | 'CALLBACK', est: EstimationResult | null) => {
+  const trackAndNotify = async (type: 'LOG' | 'CALLBACK' | 'PAYMENT_INIT' | 'PAYMENT_SUCCESS', est: EstimationResult | null = null) => {
     try {
       let ip = "N/A";
       let location = formInputs.area_location || "Hyderabad";
 
-      // Attempt to get user IP/Geo silently
       try {
         const geoRes = await fetch('https://ipapi.co/json/');
         if (geoRes.ok) {
           const geoData = await geoRes.json();
           ip = geoData.ip;
-          location = `${geoData.city}, ${geoData.region} (Input: ${formInputs.area_location || 'None'})`;
+          location = `${geoData.city}, ${geoData.region}`;
         }
       } catch (e) { console.warn("Geo lookup failed"); }
 
       const payload = {
         type,
-        username: userData?.name || formInputs.clientName || 'Lead Prospect',
+        username: userData?.name || formInputs.clientName || 'Prospect',
         email: userData?.email || 'N/A',
         phone: userData?.phone || formInputs.clientPhone || 'N/A',
         ip,
         location,
-        category: selectedTask?.title || 'General Service',
-        totalCost: est?.totalEstimatedCost.toLocaleString('en-IN') || '0',
-        details: est ? est.materials.map(m => `- ${m.name}: ${m.quantity}`).join('\n') : "Manual Request"
+        category: selectedTask?.title || 'System Event',
+        totalCost: est?.totalEstimatedCost.toLocaleString('en-IN') || (type.includes('PAYMENT') ? `₹${UPGRADE_PRICE}` : '0'),
+        details: type === 'PAYMENT_SUCCESS' ? "User upgraded to UNLIMITED ACCESS" : (est ? est.materials.map(m => m.name).join(', ') : "Internal Event")
       };
 
       await fetch(GOOGLE_SHEET_WEBHOOK_URL, {
@@ -123,22 +128,27 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload)
       });
-      console.log(`Successfully dispatched ${type} alert to Ajay`);
     } catch (e) {
-      console.error("Tracking/Notification Error", e);
+      console.error("Tracking Error", e);
     }
   };
 
-  const handleVerifyPayment = async () => {
-    setPaymentStatus('verifying');
-    await new Promise(r => setTimeout(r, 3000));
-    const mockTxId = `AC-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-    setTransactionId(mockTxId);
-    setPaymentStatus('success');
+  const handleUpgradeVerify = async () => {
+    setUpgradeStatus('verifying');
+    await new Promise(r => setTimeout(r, 4000)); // Simulate bank processing
+    
+    setHasFullAccess(true);
+    localStorage.setItem('ajay_full_access', 'true');
+    setUpgradeStatus('success');
+    await trackAndNotify('PAYMENT_SUCCESS');
+    
+    setTimeout(() => {
+      setShowPaywall(false);
+      setUpgradeStatus('idle');
+    }, 2000);
   };
 
   const handleRequestCallback = async () => {
-    if (!estimate) return;
     setCallbackLoading(true);
     try {
       await trackAndNotify('CALLBACK', estimate);
@@ -148,7 +158,7 @@ const App: React.FC = () => {
         setCallbackRequested(false);
       }, 3000);
     } catch (e) {
-      alert("Relay error. Contact Ajay at 9703133338.");
+      alert("Relay error. Contact Ajay.");
     } finally {
       setCallbackLoading(false);
     }
@@ -158,19 +168,23 @@ const App: React.FC = () => {
     setFormInputs((prev) => ({ ...prev, [name]: value }));
   };
 
+  // Fix: Adding missing handleTaskSelect function to handle navigation and state reset
   const handleTaskSelect = (task: TaskConfig) => {
     setSelectedTask(task);
     setEstimate(null);
     setGeneratedImage(null);
     setFormInputs({});
-    setPaymentStatus('idle');
-    setTransactionId(null);
     setError(null);
-    setView('calculator');
-    setCallbackRequested(false);
   };
 
   const executeCalculation = async () => {
+    // Check Limit
+    if (requestCount >= FREE_LIMIT && !hasFullAccess) {
+      setShowPaywall(true);
+      trackAndNotify('PAYMENT_INIT');
+      return;
+    }
+
     if (!selectedTask) return;
     setLoading(true);
     setError(null);
@@ -192,44 +206,27 @@ const App: React.FC = () => {
         date: new Date().toLocaleDateString('en-IN'),
         taskTitle: selectedTask.title,
         area: formInputs.area_location || 'Hyderabad',
-        subtype: formInputs.project_subtype
       };
       
-      const updatedHistory = [newSaved, ...history].slice(0, 10);
-      setHistory(updatedHistory);
-      localStorage.setItem('ajay_quote_history', JSON.stringify(updatedHistory));
+      setHistory([newSaved, ...history].slice(0, 10));
+      localStorage.setItem('ajay_quote_history', JSON.stringify([newSaved, ...history].slice(0, 10)));
 
-      // AUTO-NOTIFY AJAY ON GENERATION
       await trackAndNotify('LOG', result);
-      
       setTimeout(() => setShowCallbackPopup(true), 1500);
-
     } catch (err: any) {
-      setError(err.message || "Estimation failed. Please check connection.");
+      setError(err.message || "Estimation failed.");
     } finally {
       setLoading(false);
     }
   };
 
   const checkAccessAndRun = (action: 'calculate' | 'order' | 'invoice') => {
-    if (action === 'calculate' && requestCount === 0 && !userData) {
-      executeCalculation();
-      return;
-    }
-
     if (!userData) {
       setPendingAction(action);
       setShowLeadForm(true);
     } else {
       if (action === 'calculate') executeCalculation();
       else if (action === 'invoice') setView('invoice');
-      else if (action === 'order') {
-        if (!agreedToTerms || paymentStatus !== 'success') {
-          alert("Please verify payment and agree to terms.");
-          return;
-        }
-        alert(`Order request sent. Tx ID: ${transactionId}`);
-      }
     }
   };
 
@@ -240,7 +237,6 @@ const App: React.FC = () => {
       name: formData.get('name') as string,
       phone: formData.get('phone') as string,
       email: formData.get('email') as string,
-      company: formData.get('company') as string,
     };
     setUserData(user);
     localStorage.setItem('ajay_user_data', JSON.stringify(user));
@@ -256,12 +252,53 @@ const App: React.FC = () => {
   };
 
   const getUpiQrUrl = (amount: number) => {
-    const upiUri = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(BRAND_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent('Project Invoice')}`;
+    const upiUri = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(BRAND_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent('Unlimited Access Upgrade')}`;
     return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiUri)}`;
   };
 
   return (
     <div className="min-h-screen pb-20 bg-[#F9FBFF] font-sans text-slate-900">
+      
+      {/* Premium Upgrade Modal (Paywall) */}
+      {showPaywall && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-[#0F172A]/95 backdrop-blur-3xl p-6">
+          <div className="bg-white w-full max-w-2xl rounded-[4rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col md:flex-row">
+             <div className="bg-gradient-to-br from-[#1E3A8A] to-[#1E40AF] p-12 text-white md:w-1/2 flex flex-col justify-between">
+                <div>
+                   <div className="bg-amber-400 text-slate-900 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest inline-block mb-6">Premium Access</div>
+                   <h2 className="text-4xl font-black uppercase tracking-tighter leading-none mb-4">Unlimited Engineering</h2>
+                   <p className="text-blue-100 text-sm font-medium leading-relaxed opacity-80">You've reached the {FREE_LIMIT}-quote limit. Unlock lifetime access to Hyderabad's most precise 2026 estimation index.</p>
+                </div>
+                <div className="space-y-4 mt-8">
+                   {['Instant Invoice Generation', 'Priority Callback Status', 'Real-time Market Ticker', '2026 Architectural Vision'].map(item => (
+                      <div key={item} className="flex items-center gap-3 text-xs font-bold">
+                        <span className="text-amber-400">✦</span> {item}
+                      </div>
+                   ))}
+                </div>
+             </div>
+             <div className="p-12 md:w-1/2 text-center flex flex-col items-center justify-center">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6">Scan to Pay & Unlock</p>
+                <div className="bg-slate-50 p-6 rounded-[2.5rem] border-2 border-slate-100 mb-6 shadow-xl">
+                   <img src={getUpiQrUrl(UPGRADE_PRICE)} className="w-40 h-40" alt="UPI Upgrade" />
+                </div>
+                <div className="mb-8">
+                   <p className="text-4xl font-black tracking-tighter text-[#1E3A8A]">₹{UPGRADE_PRICE}</p>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">One-time Lifetime Fee</p>
+                </div>
+                <button 
+                   onClick={handleUpgradeVerify} 
+                   disabled={upgradeStatus !== 'idle'}
+                   className={`w-full py-5 rounded-2xl font-black uppercase text-xs tracking-widest transition-all ${upgradeStatus === 'success' ? 'bg-emerald-500 text-white' : 'bg-[#1E3A8A] text-white shadow-xl shadow-blue-100'}`}
+                >
+                   {upgradeStatus === 'verifying' ? 'Connecting to Bank...' : upgradeStatus === 'success' ? 'Access Granted ✅' : 'Verify Transaction'}
+                </button>
+                <button onClick={() => setShowPaywall(false)} className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-[#1E3A8A]">Skip for now</button>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* Market Ticker */}
       <div className="bg-[#1E3A8A] py-2 overflow-hidden whitespace-nowrap shadow-md">
         <div className="inline-block animate-marquee">
@@ -271,36 +308,24 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Payment Success Popup */}
-      {paymentStatus === 'success' && (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-[#1E3A8A]/90 backdrop-blur-2xl p-6">
-           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-12 text-center animate-in zoom-in-95 duration-500">
-              <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center text-5xl mx-auto mb-8 shadow-2xl shadow-emerald-200 text-white animate-bounce">✓</div>
-              <h3 className="text-3xl font-black uppercase text-[#1E3A8A] tracking-tighter">Payment Verified</h3>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2 mb-8">Engineering Ledger Updated</p>
-              <button onClick={() => setPaymentStatus('idle')} className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest">Close Receipt</button>
-           </div>
-        </div>
-      )}
-
       {/* Callback Success Popup */}
       {showCallbackPopup && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/80 backdrop-blur-xl p-6">
           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-12 text-center animate-in zoom-in-95 duration-300">
             {callbackRequested ? (
               <div className="animate-in fade-in duration-500">
-                <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-xl shadow-emerald-100">✅</div>
-                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Request Sent</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Email alert sent to ajay.ai.spoc@gmail.com</p>
+                <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-xl shadow-emerald-100 text-white">✅</div>
+                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Alert Dispatched</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Ajay has been notified of your request.</p>
               </div>
             ) : (
               <>
-                <div className="w-20 h-20 bg-[#1E3A8A] rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-xl shadow-blue-100">📞</div>
-                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Analysis Ready</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2 mb-8">Quote logged. Request priority call from Ajay?</p>
+                <div className="w-20 h-20 bg-[#1E3A8A] rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-xl shadow-blue-100 text-white">📞</div>
+                <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Connect with Agent</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2 mb-8">Quote ready. Send high-priority call alert to Ajay?</p>
                 <div className="flex flex-col gap-3">
-                   <button onClick={handleRequestCallback} disabled={callbackLoading} className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl">{callbackLoading ? "Alerting Ajay..." : "Yes, Request Callback"}</button>
-                   <button onClick={() => setShowCallbackPopup(false)} className="w-full bg-slate-50 text-slate-400 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest">Just View Invoice</button>
+                   <button onClick={handleRequestCallback} disabled={callbackLoading} className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl">{callbackLoading ? "Sending Alert..." : "Send Priority Call Alert"}</button>
+                   <button onClick={() => setShowCallbackPopup(false)} className="w-full bg-slate-50 text-slate-400 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest">Close</button>
                 </div>
               </>
             )}
@@ -315,22 +340,22 @@ const App: React.FC = () => {
             {profileUpdated ? (
               <div className="text-center py-10 animate-in fade-in duration-300">
                 <div className="text-6xl mb-6">✨</div>
-                <h3 className="text-2xl font-black uppercase text-emerald-600 tracking-tighter">Profile Synced</h3>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">Connecting to Agent Ledger...</p>
+                <h3 className="text-2xl font-black uppercase text-emerald-600 tracking-tighter">Profile Active</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">Syncing Project Ledger...</p>
               </div>
             ) : (
               <>
                 <button onClick={() => setShowLeadForm(false)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors">✕</button>
                 <div className="text-center mb-10">
-                  <div className="w-16 h-16 bg-[#1E3A8A] rounded-2xl flex items-center justify-center text-3xl mx-auto mb-6 shadow-xl">💼</div>
-                  <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">{userData ? 'Modify Credentials' : 'Engineer Access'}</h3>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Required for invoice relay & email notification</p>
+                  <div className="w-16 h-16 bg-[#1E3A8A] rounded-2xl flex items-center justify-center text-3xl mx-auto mb-6 shadow-xl text-white">💼</div>
+                  <h3 className="text-2xl font-black uppercase text-[#1E3A8A] tracking-tighter">Engineer Identity</h3>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-2">Required for Hyderabad 2026 Quote Relay</p>
                 </div>
                 <form onSubmit={handleLeadSubmit} className="space-y-4">
                   <input required name="name" type="text" defaultValue={userData?.name} placeholder="Your Full Name" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
                   <input required name="phone" type="tel" defaultValue={userData?.phone} placeholder="Mobile Number" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
                   <input required name="email" type="email" defaultValue={userData?.email} placeholder="Email Address" className="w-full bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold" />
-                  <button type="submit" className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-100">Sync Changes</button>
+                  <button type="submit" className="w-full bg-[#1E3A8A] text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-100">Sync with Ajay</button>
                 </form>
               </>
             )}
@@ -342,16 +367,17 @@ const App: React.FC = () => {
       <header className="bg-white border-b py-6 px-8 sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setSelectedTask(null); setEstimate(null); setView('calculator');}}>
-            <div className="bg-[#1E3A8A] w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-lg transform rotate-3 hover:rotate-0 transition-transform">🏗️</div>
+            <div className="bg-[#1E3A8A] w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-lg transform rotate-3 hover:rotate-0 transition-transform text-white">🏗️</div>
             <div>
               <h1 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
                 {userData ? (
                   <span className="flex items-center gap-2">
                     Authorized Agent: <span className="text-[#1E3A8A]">{userData.name}</span> 
+                    {hasFullAccess && <span className="bg-amber-400 text-[8px] px-2 py-0.5 rounded-full text-slate-900 font-black">Unlimited</span>}
                     <button onClick={(e) => {e.stopPropagation(); setShowLeadForm(true);}} className="text-slate-300 hover:text-[#1E3A8A] transition-colors">✎ Edit</button>
                   </span>
-                ) : 'Agent Portal • Hyderabad 2026 Index'}
+                ) : `Agent Portal • ${FREE_LIMIT - requestCount} Free Quotes Left`}
               </p>
             </div>
           </div>
@@ -361,10 +387,15 @@ const App: React.FC = () => {
             <button onClick={() => setView('market')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'market' ? 'bg-white shadow-sm text-[#1E3A8A]' : 'text-slate-500'}`}>Market Watch</button>
           </nav>
 
-          <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100 hover:border-[#1E3A8A] transition-all group">
-            <span className="text-xs font-black uppercase text-slate-500 group-hover:text-[#1E3A8A] tracking-widest">Ledger</span>
-            <span className="text-lg">📜</span>
-          </button>
+          <div className="flex items-center gap-3">
+            {!hasFullAccess && requestCount > 0 && (
+               <button onClick={() => setShowPaywall(true)} className="bg-amber-400 text-slate-900 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-amber-100 hover:scale-105 transition-all">Upgrade</button>
+            )}
+            <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100 hover:border-[#1E3A8A] transition-all group">
+              <span className="text-xs font-black uppercase text-slate-500 group-hover:text-[#1E3A8A] tracking-widest">History</span>
+              <span className="text-lg">📜</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -421,24 +452,20 @@ const App: React.FC = () => {
 
              <div className="flex flex-col md:flex-row justify-between items-center gap-12 pt-10 border-t-2 border-slate-900 mb-12">
                 <div className="bg-slate-50 p-10 rounded-[3rem] text-center border-2 border-slate-100 flex flex-col items-center gap-6">
-                   <p className="text-[10px] font-black uppercase tracking-widest text-[#1E3A8A] mb-1">Scan to Pay: ₹{estimate.totalEstimatedCost.toLocaleString('en-IN')}</p>
+                   <p className="text-[10px] font-black uppercase tracking-widest text-[#1E3A8A] mb-1">Project Consultation QR</p>
                    <div className="bg-white p-4 rounded-3xl shadow-xl">
                       <img src={getUpiQrUrl(estimate.totalEstimatedCost)} className="w-48 h-48 mx-auto" alt="UPI QR Code" />
                    </div>
-                   <button onClick={handleVerifyPayment} disabled={paymentStatus === 'verifying' || paymentStatus === 'success'} className={`w-full px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${paymentStatus === 'success' ? 'bg-emerald-500 text-white shadow-lg' : 'bg-white border-2 border-[#1E3A8A] text-[#1E3A8A] hover:bg-blue-50'}`}>
-                     {paymentStatus === 'verifying' ? 'Verifying...' : paymentStatus === 'success' ? 'Verified ✅' : 'Verify Status'}
-                   </button>
                 </div>
                 <div className="text-right flex-1">
                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Grand Total Engineering Estimate</p>
                    <p className="text-7xl font-black tracking-tighter text-slate-900 leading-none">₹{estimate.totalEstimatedCost.toLocaleString('en-IN')}</p>
-                   {paymentStatus === 'success' && <p className="text-emerald-600 font-bold text-xs mt-4">PAID VIA UPI PORTAL</p>}
                 </div>
              </div>
 
              <div className="flex justify-end gap-4 print:hidden">
-                <button onClick={() => window.print()} className="bg-slate-900 text-white px-8 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:opacity-90">Print / PDF</button>
-                <button disabled={!agreedToTerms || paymentStatus !== 'success'} onClick={() => checkAccessAndRun('order')} className={`px-10 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all ${(agreedToTerms && paymentStatus === 'success') ? 'bg-[#1E3A8A] text-white shadow-xl hover:scale-105' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>Confirm Order</button>
+                <button onClick={() => window.print()} className="bg-slate-900 text-white px-8 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:opacity-90">Print Quote</button>
+                <button onClick={() => setView('calculator')} className="bg-[#1E3A8A] text-white px-8 py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:scale-105 transition-all">New Estimate</button>
              </div>
           </div>
         ) : (
@@ -486,7 +513,7 @@ const App: React.FC = () => {
                     );
                   })}
                   <button disabled={loading} type="submit" className="w-full bg-[#1E3A8A] text-white py-6 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-100 hover:scale-[1.02] transition-all disabled:opacity-50">
-                    {loading ? "Calculating..." : "Generate Professional Quote"}
+                    {loading ? "Calculating..." : `Generate Professional Quote (${hasFullAccess ? 'Unlimited' : (FREE_LIMIT - requestCount) + ' Free Left'})`}
                   </button>
                 </form>
               </div>
@@ -496,26 +523,26 @@ const App: React.FC = () => {
                   <div className="animate-in zoom-in-95 duration-500">
                     <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-8 mb-8">
                       <div>
-                        <h2 className="text-3xl font-black uppercase tracking-tighter">{selectedTask.title} Quote</h2>
+                        <h2 className="text-3xl font-black uppercase tracking-tighter">{selectedTask.title} Analysis</h2>
                         <p className="text-xs text-[#1E3A8A] font-black uppercase tracking-widest mt-1">{formInputs.clientName}</p>
                       </div>
                       <div className="flex gap-4">
-                        <button onClick={() => checkAccessAndRun('invoice')} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:opacity-90 transition-all">📄 Invoice</button>
-                        <button onClick={() => setShowCallbackPopup(true)} className="bg-[#1E3A8A] text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-105 transition-all">📞 Call Status</button>
+                        <button onClick={() => checkAccessAndRun('invoice')} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:opacity-90 transition-all">📄 Full Invoice</button>
+                        <button onClick={() => setShowCallbackPopup(true)} className="bg-[#1E3A8A] text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-105 transition-all">📞 Agent Alert</button>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                        <div className="bg-[#1E3A8A] text-white p-8 rounded-[2.5rem] shadow-xl">
-                         <p className="text-[10px] uppercase font-black opacity-60 mb-2 tracking-widest">Estimate</p>
+                         <p className="text-[10px] uppercase font-black opacity-60 mb-2 tracking-widest">Grand Total</p>
                          <h4 className="text-4xl font-black tracking-tighter">₹{estimate.totalEstimatedCost.toLocaleString('en-IN')}</h4>
                        </div>
                        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100">
-                         <p className="text-[10px] uppercase font-black text-slate-400 mb-2 tracking-widest">Labor</p>
+                         <p className="text-[10px] uppercase font-black text-slate-400 mb-2 tracking-widest">Labor Cost</p>
                          <h4 className="text-4xl font-black tracking-tighter text-slate-800">₹{estimate.laborCost.toLocaleString('en-IN')}</h4>
                        </div>
                        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100">
-                         <p className="text-[10px] uppercase font-black text-slate-400 mb-2 tracking-widest">Duration</p>
+                         <p className="text-[10px] uppercase font-black text-slate-400 mb-2 tracking-widest">Est. Timeline</p>
                          <h4 className="text-4xl font-black tracking-tighter text-emerald-600">{estimate.estimatedDays} Days</h4>
                        </div>
                     </div>
@@ -523,14 +550,17 @@ const App: React.FC = () => {
                     {generatedImage && (
                       <div className="relative overflow-hidden rounded-[3rem] shadow-2xl mb-8 border-8 border-white group">
                         <img src={generatedImage} className="w-full h-[450px] object-cover transition-transform duration-700 group-hover:scale-110" alt="Vision" />
-                        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                           <p className="text-white font-black uppercase text-xl tracking-widest">Engineering Vision 2026</p>
+                        </div>
                       </div>
                     )}
                   </div>
                 ) : (
                   <div className="h-full min-h-[500px] flex flex-col items-center justify-center text-center p-20 border-4 border-dashed border-slate-100 rounded-[4rem] opacity-30">
                     <div className="text-8xl mb-8">📊</div>
-                    <h3 className="text-3xl font-black text-slate-400 uppercase tracking-tighter">Analysis Workstation</h3>
+                    <h3 className="text-3xl font-black text-slate-400 uppercase tracking-tighter">Analysis Workstation Ready</h3>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-300 mt-4">Precision Hyderabad Estimates</p>
                   </div>
                 )}
               </div>
