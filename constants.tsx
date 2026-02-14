@@ -118,24 +118,77 @@ export const CONSTRUCTION_TASKS: TaskConfig[] = [
     ]
   },
   {
-    id: 'plumbing',
-    title: 'Sanitary & Utility',
+    id: 'sanitary_kitchen',
+    title: 'Sanitary & Kitchen',
     icon: '🚰',
-    description: 'CPVC piping, drainage, and premium bathroom fixtures.',
+    description: 'Plumbing, fixture installation, and modular kitchen utility setups.',
     fields: [
       ...COMMON_FIELDS,
-      { name: 'bathrooms', label: 'No. of Toilets/Kitchens', type: 'number', placeholder: 'e.g., 3' }
+      { 
+        name: 'work_scope', 
+        label: 'Service Scope', 
+        type: 'select', 
+        placeholder: 'Select work area', 
+        options: ['Bathrooms Only', 'Kitchen Only', 'Both Bathroom & Kitchen'] 
+      },
+      { 
+        name: 'bathrooms', 
+        label: 'Number of Bathrooms', 
+        type: 'number', 
+        placeholder: 'e.g., 2',
+        dependsOn: 'work_scope',
+        showIfValue: ['Bathrooms Only', 'Both Bathroom & Kitchen']
+      },
+      { 
+        name: 'pipeline_status', 
+        label: 'Pipeline Status', 
+        type: 'select', 
+        placeholder: 'Select status', 
+        options: ['Already Installed (Fixture Only)', 'Need New Pipeline Installation'],
+        dependsOn: 'work_scope',
+        showIfValue: ['Bathrooms Only', 'Both Bathroom & Kitchen']
+      },
+      { 
+        name: 'kitchen_width', 
+        label: 'Kitchen Width (ft)', 
+        type: 'number', 
+        placeholder: 'e.g., 10',
+        dependsOn: 'work_scope',
+        showIfValue: ['Kitchen Only', 'Both Bathroom & Kitchen']
+      },
+      { 
+        name: 'kitchen_height', 
+        label: 'Kitchen Height (ft)', 
+        type: 'number', 
+        placeholder: 'e.g., 9',
+        dependsOn: 'work_scope',
+        showIfValue: ['Kitchen Only', 'Both Bathroom & Kitchen']
+      }
     ]
   },
   {
     id: 'wall_construction',
     title: 'Brickwork & Masonry',
     icon: '🧱',
-    description: 'Traditional red brick or modern AAC block wall builds.',
+    description: 'Traditional red brick, modern AAC block, or cement brick wall builds.',
     fields: [
       ...COMMON_FIELDS,
-      { name: 'width', label: 'Total Length (ft)', type: 'number', placeholder: 'e.g., 40' },
-      { name: 'height', label: 'Height (ft)', type: 'number', placeholder: '10' }
+      { 
+        name: 'brick_type', 
+        label: 'Brick/Block Material', 
+        type: 'select', 
+        placeholder: 'Select Brick Type', 
+        options: ['Table Molded Red Bricks', 'Wire Cut Red Bricks', 'Solid Cement Bricks', 'Fly Ash Bricks', 'AAC Blocks (Lightweight)'] 
+      },
+      { 
+        name: 'wall_thickness', 
+        label: 'Wall Thickness', 
+        type: 'select', 
+        placeholder: 'Select Thickness', 
+        options: ['9 inch (External)', '4.5 inch (Internal Partition)', '6 inch (AAC Standard)'] 
+      },
+      { name: 'width', label: 'Total Wall Length (ft)', type: 'number', placeholder: 'e.g., 40' },
+      { name: 'height', label: 'Wall Height (ft)', type: 'number', placeholder: 'e.g., 10' }
     ]
   }
 ];

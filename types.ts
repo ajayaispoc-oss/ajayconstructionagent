@@ -4,7 +4,7 @@ export type ConstructionCategory =
   | 'painting' 
   | 'tiling' 
   | 'electrical' 
-  | 'plumbing' 
+  | 'sanitary_kitchen' 
   | 'full_house';
 
 export type HyderabadArea = 
@@ -18,6 +18,8 @@ export interface UserData {
   name: string;
   phone: string;
   email: string;
+  // Added location to support area-specific estimation logic
+  location?: string;
   company?: string;
 }
 
@@ -45,7 +47,7 @@ export interface EstimationResult {
   expertTips: string;
   visualPrompt: string;
   timeline?: TimelineEvent[];
-  paintCodeSuggestions?: string[]; // New field for paint codes
+  paintCodeSuggestions?: string[];
 }
 
 export interface TaskField {
@@ -55,7 +57,7 @@ export interface TaskField {
   placeholder: string;
   options?: string[];
   dependsOn?: string;
-  showIfValue?: string;
+  showIfValue?: string | string[];
 }
 
 export interface TaskConfig {
