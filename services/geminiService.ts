@@ -30,9 +30,7 @@ const cache = {
     } catch (e) { return null; }
   },
   generateKey: (prefix: string, obj: any) => {
-    // Generate a unique key based on relevant inputs
     const cleanObj = { ...obj };
-    // Don't include personal details in cache key to allow reuse across similar project dimensions
     delete cleanObj.clientName; 
     delete cleanObj.clientPhone;
     return `${prefix}_${JSON.stringify(cleanObj).replace(/\s+/g, '')}`;
@@ -52,10 +50,7 @@ export const getConstructionEstimate = async (
   Provide a detailed Bill of Materials (BOM) for the task: ${category}.
   User Inputs: ${JSON.stringify(inputs)}.
   Enforce Brand usage: Ashirvad for plumbing, Goldmedal/Finolex for electrical, Asian Paints for finishing.
-  Return strictly as JSON. Ensure prices reflect the current 2026 market trends in Hyderabad.
-  
-  Format Requirement:
-  Only return a JSON object that matches the requested schema. No conversational text.`;
+  Return strictly as JSON. Ensure prices reflect the current 2026 market trends in Hyderabad.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -77,7 +72,8 @@ export const getConstructionEstimate = async (
                   unitPrice: { type: Type.NUMBER },
                   totalPrice: { type: Type.NUMBER },
                   brandSuggestion: { type: Type.STRING }
-                }
+                },
+                required: ["name", "quantity", "unitPrice", "totalPrice"]
               }
             },
             laborCost: { type: Type.NUMBER },
@@ -86,26 +82,24 @@ export const getConstructionEstimate = async (
             totalEstimatedCost: { type: Type.NUMBER },
             expertTips: { type: Type.STRING },
             visualPrompt: { type: Type.STRING }
-          }
+          },
+          required: ["category", "materials", "totalEstimatedCost", "laborCost", "estimatedDays", "visualPrompt"]
         }
       }
     });
 
     const text = response.text?.trim();
-    if (!text) {
-      throw new Error("Empty response from AI model.");
-    }
+    if (!text) throw new Error("Empty response from AI model.");
     const result = JSON.parse(text);
     cache.set(cacheKey, result);
     return result;
   } catch (error) {
     console.error("Gemini Content Error:", error);
-    throw new Error("Failed to generate estimate due to a model error. Please check your inputs and try again.");
+    throw new Error("Failed to generate estimate.");
   }
 };
 
 export const generateDesignImage = async (category: string, visualPrompt: string): Promise<string | null> => {
-  // Reuse same image for each category to save costs
   const categoryCacheKey = `img_cat_${category}`;
   const cachedImg = cache.get<string>(categoryCacheKey, IMAGE_CACHE_EXPIRY);
   if (cachedImg) return cachedImg;
@@ -115,12 +109,11 @@ export const generateDesignImage = async (category: string, visualPrompt: string
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
-        parts: [{ text: `High-quality architect render for ${category} category: ${visualPrompt}. Luxury interior or exterior, realistic materials, photorealistic construction finishing.` }]
+        parts: [{ text: `High-quality architect render for ${category}: ${visualPrompt}. Realistic materials, photorealistic.` }]
       },
       config: { imageConfig: { aspectRatio: "16:9" } }
     });
     
-    // Defensive check for candidates and parts
     const candidates = response.candidates;
     const imagePart = candidates?.[0]?.content?.parts?.find(p => p.inlineData);
     const base64 = imagePart?.inlineData?.data;
@@ -144,20 +137,49 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "Current 2026 Construction Market Price Index for Hyderabad (Cement, Steel, Tiles, Plumbing, Electrical). Return JSON only.",
-      config: { responseMimeType: "application/json" }
+      contents: "Current 2026 Construction Market Price Index for Hyderabad (Cement, Steel, Tiles, Plumbing, Electrical).",
+      config: { 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            lastUpdated: { type: Type.STRING },
+            categories: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  items: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        category: { type: Type.STRING },
+                        brandName: { type: Type.STRING },
+                        specificType: { type: Type.STRING },
+                        priceWithGst: { type: Type.NUMBER },
+                        unit: { type: Type.STRING },
+                        trend: { type: Type.STRING }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          required: ["lastUpdated", "categories"]
+        }
+      }
     });
     
     const text = response.text?.trim();
-    if (!text) {
-      throw new Error("Empty response from market API.");
-    }
+    if (!text) throw new Error("Empty response from market API.");
     const result = JSON.parse(text);
     cache.set('market_prices', result);
     return result;
   } catch (error) {
     console.error("Gemini Market Error:", error);
-    // Fallback static data if API fails to avoid complete breakage
     return {
       lastUpdated: new Date().toISOString(),
       categories: [
