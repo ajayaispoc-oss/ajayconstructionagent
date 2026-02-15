@@ -3,9 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { EstimationResult, TaskConfig, MarketPriceList, UserData } from './types';
 import { CONSTRUCTION_TASKS } from './constants';
 import { getConstructionEstimate, generateDesignImage, getRawMaterialPriceList } from './services/geminiService';
+import { notifyCloud } from './services/notificationService';
 
 const UPI_ID = "ajay.t.me@icici";
-const BRAND_NAME = "Ajay Constructions";
+const BRAND_NAME = "Ajay Infra"; // Updated to match domain
 const FREE_LIMIT = 3;
 const UPGRADE_PRICE = 499;
 
@@ -13,8 +14,8 @@ const TERMS_AND_CONDITIONS = [
   "Validity: This estimate is valid for 7 days due to market volatility.",
   "Payment Schedule: 50% Advance for materials, 40% on 70% completion, 10% after handover.",
   "Warranty: 1-year structural warranty on masonry.",
-  "Design Policy: The visual render is for indicative purpose only. Actual execution depends on site feasibility.",
-  "Business Impact: Failure to match the indicative render does not constitute a breach of contract, as renders are stylistic visions. Specific custom matches may increase material costs by 20-30%."
+  "Design Policy: The visual render is for indicative purpose only.",
+  "Business Impact: Renders are stylistic visions. Specific matches may increase costs by 20-30%."
 ];
 
 const MARKET_TICKER = [
@@ -30,6 +31,7 @@ const App: React.FC = () => {
   const [selectedTask, setSelectedTask] = useState<TaskConfig | null>(null);
   const [formInputs, setFormInputs] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
+  const [activating, setActivating] = useState(false);
   const [estimate, setEstimate] = useState<EstimationResult | null>(null);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [marketPrices, setMarketPrices] = useState<MarketPriceList | null>(null);
@@ -45,6 +47,24 @@ const App: React.FC = () => {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [pendingAction, setPendingAction] = useState<'calculate' | 'invoice' | 'upgrade' | null>(null);
+
+  // Sync across tabs & Tracking Page Access
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'ajay_is_upgraded') setIsUpgraded(e.newValue === 'true');
+      if (e.key === 'ajay_request_count') setRequestCount(parseInt(e.newValue || "0"));
+    };
+    window.addEventListener('storage', handleStorage);
+    
+    // Notify access on load
+    notifyCloud('access', { 
+      userAgent: navigator.userAgent, 
+      screen: `${window.innerWidth}x${window.innerHeight}`,
+      isReturning: !!localStorage.getItem('ajay_last_user')
+    });
+
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   useEffect(() => {
     const savedSession = sessionStorage.getItem('agent_session_context');
@@ -119,6 +139,14 @@ const App: React.FC = () => {
       const imageUrl = await generateDesignImage(selectedTask.id, result.visualPrompt);
       setGeneratedImage(imageUrl);
 
+      // Cloud Notification for Quote
+      notifyCloud('quote', { 
+        user: userData, 
+        task: selectedTask.title, 
+        inputs: formInputs, 
+        total: result.totalEstimatedCost 
+      });
+
       if (!isUpgraded) {
         const nextCount = requestCount + 1;
         setRequestCount(nextCount);
@@ -126,16 +154,46 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       console.error("Calculation error:", err);
-      alert("Encountered an internal error during calculation. Please try again.");
+      alert("Encountered an internal error. Please check your internet or try later.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUpgradeActivation = () => {
-    setIsUpgraded(true);
-    localStorage.setItem('ajay_is_upgraded', 'true');
-    setShowUpgradeModal(false);
+  const handleUpgradeActivation = (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    const name = formData.get('name') as string;
+    const phone = formData.get('phone') as string;
+    const email = formData.get('email') as string;
+    
+    if (!name || !phone) {
+      alert("Please enter your name and phone to verify payment.");
+      return;
+    }
+
+    setActivating(true);
+    
+    setTimeout(() => {
+      setIsUpgraded(true);
+      localStorage.setItem('ajay_is_upgraded', 'true');
+      setActivating(false);
+      setShowUpgradeModal(false);
+      
+      const user: UserData = {
+        name,
+        phone,
+        email,
+        location: (formData.get('location') as string) || userData?.location || ''
+      };
+      setUserData(user);
+      sessionStorage.setItem('agent_session_context', JSON.stringify(user));
+      
+      // Cloud Notification for Upgrade
+      notifyCloud('upgrade', { user });
+
+      alert(`Payment of ₹${UPGRADE_PRICE} Verified! Welcome to Premium, ${name}.`);
+    }, 2500);
   };
 
   const getUpiQrUrl = (amount?: number) => {
@@ -151,6 +209,8 @@ const App: React.FC = () => {
     setGeneratedImage(null);
     setSelectedTask(null);
   };
+
+  const isLimitReached = requestCount >= FREE_LIMIT && !isUpgraded;
 
   return (
     <div className="min-h-screen bg-[#F9FBFF] font-sans text-slate-900 pb-20">
@@ -277,6 +337,17 @@ const App: React.FC = () => {
           <div className="grid lg:grid-cols-12 gap-12">
             {!selectedTask ? (
               <div className="lg:col-span-12 space-y-12">
+                {userData?.name && (
+                  <div className="bg-white p-10 rounded-[2.5rem] border-l-[12px] border-[#1E3A8A] shadow-xl animate-in slide-in-from-left duration-700 bg-gradient-to-r from-white to-blue-50/30">
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className="w-10 h-10 bg-[#1E3A8A] rounded-full flex items-center justify-center text-white text-xl">✨</div>
+                      <p className="text-[#1E3A8A] font-black uppercase tracking-[0.2em] text-[10px]">Active Project Context</p>
+                    </div>
+                    <h2 className="text-4xl font-black tracking-tighter leading-tight">Hello Welcome, <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#1E3A8A] to-blue-500">{userData.name}</span>!</h2>
+                    <p className="text-slate-500 text-sm font-medium mt-2 max-w-2xl">Your session at <span className="font-bold text-slate-800">ajayinfra.com</span> is verified. Every quote you generate is synced to your cloud ledger for later retrieval.</p>
+                  </div>
+                )}
+                
                 <div className="grid md:grid-cols-3 gap-8 animate-in slide-in-from-bottom-8 duration-500">
                   {CONSTRUCTION_TASKS.map(task => (
                     <button key={task.id} onClick={() => { setSelectedTask(task); setEstimate(null); setGeneratedImage(null); }} className="bg-white p-12 rounded-[3.5rem] border shadow-sm hover:shadow-2xl transition-all text-left group">
@@ -304,7 +375,6 @@ const App: React.FC = () => {
                        </button>
                     </div>
                     <div className="relative z-10 w-48 h-48 bg-white/10 rounded-[3rem] backdrop-blur-md flex items-center justify-center text-7xl">💎</div>
-                    <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
                   </div>
                 )}
               </div>
@@ -312,8 +382,20 @@ const App: React.FC = () => {
               <>
                 <div className="lg:col-span-4 bg-white p-10 rounded-[3.5rem] shadow-xl border sticky top-32 h-fit">
                    <button onClick={handleNavToEstimator} className="text-[10px] font-black text-[#1E3A8A] mb-8 uppercase hover:underline">← All Services</button>
+                   
+                   {userData?.name && (
+                     <div className="mb-8 p-6 bg-slate-50 rounded-[2rem] border-2 border-slate-100">
+                        <p className="text-[9px] font-black uppercase text-[#1E3A8A] tracking-widest mb-1">Authenticated</p>
+                        <h4 className="text-xl font-black truncate text-slate-800">Hello {userData.name}</h4>
+                     </div>
+                   )}
+
                    <form onSubmit={(e) => {
                      e.preventDefault();
+                     if (isLimitReached) {
+                       setShowUpgradeModal(true);
+                       return;
+                     }
                      if (!userData) { setPendingAction('calculate'); setShowLeadForm(true); }
                      else executeCalculation();
                    }} className="space-y-6">
@@ -335,9 +417,25 @@ const App: React.FC = () => {
                           </div>
                         );
                       })}
-                      <button disabled={loading} type="submit" className="w-full bg-[#1E3A8A] text-white py-6 rounded-2xl font-black uppercase text-xs shadow-2xl hover:scale-[1.02] active:scale-95 transition-all">
-                         {loading ? "Ledger Computing..." : "Generate Analysis"}
-                      </button>
+                      
+                      {isLimitReached ? (
+                        <div className="space-y-4">
+                           <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-center border border-red-100">
+                             Free Limit Reached ({FREE_LIMIT}/{FREE_LIMIT})
+                           </div>
+                           <button 
+                             type="button" 
+                             onClick={() => setShowUpgradeModal(true)}
+                             className="w-full bg-amber-400 text-slate-900 py-6 rounded-2xl font-black uppercase text-xs shadow-2xl hover:scale-[1.02] transition-all"
+                           >
+                             Upgrade for Unlimited 🚀
+                           </button>
+                        </div>
+                      ) : (
+                        <button disabled={loading} type="submit" className="w-full bg-[#1E3A8A] text-white py-6 rounded-2xl font-black uppercase text-xs shadow-2xl hover:scale-[1.02] active:scale-95 transition-all">
+                           {loading ? "Cloud Syncing..." : "Generate Analysis"}
+                        </button>
+                      )}
                    </form>
                 </div>
 
@@ -426,9 +524,15 @@ const App: React.FC = () => {
                      </div>
                    ) : (
                      <div className="h-[600px] flex flex-col items-center justify-center text-center p-20 border-8 border-dashed border-slate-100 rounded-[5rem] opacity-30 animate-pulse">
-                        <div className="text-[10rem] mb-12">📊</div>
-                        <h3 className="text-4xl font-black text-slate-400 uppercase tracking-tighter leading-none">Engineering Desk Ready</h3>
-                        <p className="text-sm font-bold text-slate-300 mt-4 uppercase tracking-[0.2em]">Input project metrics for AI Analysis</p>
+                        <div className="text-[10rem] mb-12">{loading ? "⏳" : "📊"}</div>
+                        <h3 className="text-4xl font-black text-slate-400 uppercase tracking-tighter leading-none">
+                          {loading ? "Please Wait..." : "Engineering Desk Ready"}
+                        </h3>
+                        <p className="text-sm font-bold text-slate-300 mt-4 uppercase tracking-[0.2em]">
+                          {loading 
+                            ? "Generating invoice with current prices from Troop Bazar, Hyderabad" 
+                            : "Input project metrics for AI Analysis"}
+                        </p>
                      </div>
                    )}
                 </div>
@@ -474,21 +578,21 @@ const App: React.FC = () => {
           <div className="bg-white w-full max-w-4xl rounded-[5rem] p-12 text-center shadow-2xl border border-white/20 animate-in zoom-in-95 duration-500 relative my-auto">
              <button onClick={() => setShowUpgradeModal(false)} className="absolute top-12 right-12 text-slate-300 hover:text-slate-900 transition-colors">✕</button>
              
-             <div className="grid md:grid-cols-2 gap-12 items-center text-left">
-                <div className="space-y-6">
+             <div className="grid md:grid-cols-2 gap-12 items-stretch text-left">
+                <div className="space-y-6 flex flex-col">
                    <div className="inline-block bg-amber-400 text-slate-900 px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest">Premium Services Terminal</div>
                    <h2 className="text-5xl font-black uppercase tracking-tighter text-slate-900 leading-none">Upgrade Pro</h2>
                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Unlimited estimations, custom branding, and priority support.</p>
                    
-                   <div className="bg-slate-50 p-8 rounded-[3rem] border shadow-inner">
+                   <div className="bg-slate-50 p-8 rounded-[3rem] border shadow-inner flex-grow">
                       <h4 className="text-[10px] font-black uppercase text-[#1E3A8A] mb-4">Identity Verification</h4>
-                      <form onSubmit={handleLeadSubmit} className="space-y-4">
-                         <input required name="name" type="text" placeholder="Full Name" defaultValue={userData?.name} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm" />
-                         <div className="grid grid-cols-2 gap-4">
-                            <input required name="phone" type="tel" placeholder="Mobile" defaultValue={userData?.phone} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm" />
-                            <input required name="email" type="email" placeholder="Email" defaultValue={userData?.email} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm" />
+                      <form id="upgradeForm" onSubmit={handleUpgradeActivation} className="space-y-4">
+                         <input required name="name" type="text" placeholder="Full Name" defaultValue={userData?.name} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm focus:border-[#1E3A8A]" />
+                         <div className="grid grid-cols-1 gap-4">
+                            <input required name="phone" type="tel" placeholder="Mobile" defaultValue={userData?.phone} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm focus:border-[#1E3A8A]" />
+                            <input required name="email" type="email" placeholder="Email" defaultValue={userData?.email} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm focus:border-[#1E3A8A]" />
                          </div>
-                         <select required name="location" defaultValue={userData?.location} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm">
+                         <select name="location" defaultValue={userData?.location} className="w-full bg-white p-4 rounded-2xl border outline-none font-bold text-sm focus:border-[#1E3A8A]">
                             <option value="">Sub-Zone</option>
                             <option value="Madhapur">Madhapur</option>
                             <option value="Gachibowli">Gachibowli</option>
@@ -498,7 +602,7 @@ const App: React.FC = () => {
                             <option value="Manikonda">Manikonda</option>
                             <option value="Kondapur">Kondapur</option>
                          </select>
-                         <p className="text-[8px] font-bold text-slate-400 uppercase text-center mt-2">Session will be updated upon establishing identity</p>
+                         <p className="text-[8px] font-bold text-slate-400 uppercase text-center mt-2 italic">Fill all details above before activating</p>
                       </form>
                    </div>
                 </div>
@@ -507,17 +611,19 @@ const App: React.FC = () => {
                    <div className="bg-white p-6 rounded-[3rem] mb-6 shadow-xl">
                       <img src={getUpiQrUrl(UPGRADE_PRICE)} className="w-48 h-48 rounded-2xl" alt="UPI Scanner" />
                    </div>
-                   <div className="text-center">
+                   <div className="text-center mb-8">
                       <p className="text-[10px] font-black uppercase opacity-60 mb-1 tracking-widest">Premium Activation Fee</p>
                       <h3 className="text-5xl font-black tracking-tighter">₹{UPGRADE_PRICE}</h3>
                       <p className="text-[10px] font-bold mt-4 uppercase tracking-[0.2em] bg-white/10 py-2 px-4 rounded-full">One-Time Lifetime Access</p>
                    </div>
                    
                    <button 
-                     onClick={handleUpgradeActivation} 
-                     className="mt-8 w-full bg-white text-[#1E3A8A] py-6 rounded-3xl font-black uppercase text-xs shadow-xl hover:scale-105 active:scale-95 transition-all"
+                     form="upgradeForm"
+                     type="submit"
+                     disabled={activating}
+                     className={`w-full py-6 rounded-3xl font-black uppercase text-xs shadow-xl transition-all ${activating ? 'bg-slate-400 cursor-not-allowed' : 'bg-white text-[#1E3A8A] hover:scale-105 active:scale-95'}`}
                    >
-                     Confirm Payment & Activate 🚀
+                     {activating ? 'Verifying Payment...' : 'Confirm Payment & Activate 🚀'}
                    </button>
                 </div>
              </div>
