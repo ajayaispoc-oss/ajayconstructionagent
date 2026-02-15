@@ -47,7 +47,7 @@ export const getConstructionEstimate = async (
   const cachedData = cache.get<EstimationResult>(cacheKey, ESTIMATE_CACHE_EXPIRY);
   if (cachedData) return cachedData;
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const prompt = `Act as a Senior Construction Estimator for Hyderabad (Jan 2026 Index).
   Provide a detailed Bill of Materials (BOM) for the task: ${category}.
   User Inputs: ${JSON.stringify(inputs)}.
@@ -91,7 +91,11 @@ export const getConstructionEstimate = async (
       }
     });
 
-    const result = JSON.parse(response.text.trim());
+    const text = response.text?.trim();
+    if (!text) {
+      throw new Error("Empty response from AI model.");
+    }
+    const result = JSON.parse(text);
     cache.set(cacheKey, result);
     return result;
   } catch (error) {
@@ -106,7 +110,7 @@ export const generateDesignImage = async (category: string, visualPrompt: string
   const cachedImg = cache.get<string>(categoryCacheKey, IMAGE_CACHE_EXPIRY);
   if (cachedImg) return cachedImg;
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -116,8 +120,9 @@ export const generateDesignImage = async (category: string, visualPrompt: string
       config: { imageConfig: { aspectRatio: "16:9" } }
     });
     
-    // Find the image part in response parts
-    const imagePart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+    // Defensive check for candidates and parts
+    const candidates = response.candidates;
+    const imagePart = candidates?.[0]?.content?.parts?.find(p => p.inlineData);
     const base64 = imagePart?.inlineData?.data;
     
     if (base64) {
@@ -135,14 +140,19 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
   const cachedMarket = cache.get<MarketPriceList>('market_prices', MARKET_CACHE_EXPIRY);
   if (cachedMarket) return cachedMarket;
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: "Current 2026 Construction Market Price Index for Hyderabad (Cement, Steel, Tiles, Plumbing, Electrical). Return JSON only.",
       config: { responseMimeType: "application/json" }
     });
-    const result = JSON.parse(response.text.trim());
+    
+    const text = response.text?.trim();
+    if (!text) {
+      throw new Error("Empty response from market API.");
+    }
+    const result = JSON.parse(text);
     cache.set('market_prices', result);
     return result;
   } catch (error) {
