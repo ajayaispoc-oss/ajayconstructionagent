@@ -1,11 +1,10 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Chat, GenerateContentResponse } from "@google/genai";
 import { EstimationResult, ConstructionCategory, MarketPriceList } from "../types";
 
-// Cache durations: Market is shorter now (1 hour) to fix stale data issues on tab revisit
 const MARKET_CACHE_EXPIRY = 60 * 60 * 1000; 
 const ESTIMATE_CACHE_EXPIRY = 2 * 60 * 60 * 1000;
-const IMAGE_CACHE_EXPIRY = 30 * 24 * 60 * 60 * 1000; // 30 Days
+const IMAGE_CACHE_EXPIRY = 30 * 24 * 60 * 60 * 1000;
 
 interface CacheItem<T> {
   data: T;
@@ -35,6 +34,29 @@ const cache = {
     delete cleanObj.clientPhone;
     return `${prefix}_${JSON.stringify(cleanObj).replace(/\s+/g, '')}`;
   }
+};
+
+let activeChat: Chat | null = null;
+
+export const startAssistantChat = () => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  activeChat = ai.chats.create({
+    model: 'gemini-2.5-flash-lite-latest',
+    config: {
+      systemInstruction: `You are the Virtual Site Engineer for Ajay Infra, Hyderabad. 
+      You are an expert in construction materials (UltraTech, Vizag Steel, Ashirvad pipes, Asian Paints).
+      Your tone is professional, helpful, and localized to Hyderabad (mentioning areas like Madhapur, Gachibowli, Troop Bazar).
+      If the user asks for a price, refer to current 2026 market trends. 
+      Always encourage the user to generate a 'Professional Quote' using the tools on the left if they need exact numbers.`,
+    },
+  });
+  return activeChat;
+};
+
+export const sendMessageToAssistant = async (message: string) => {
+  if (!activeChat) startAssistantChat();
+  const response = await activeChat!.sendMessageStream({ message });
+  return response;
 };
 
 export const getConstructionEstimate = async (
