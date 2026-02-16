@@ -36,12 +36,40 @@ const cache = {
   }
 };
 
+/**
+ * Robust retry utility with exponential backoff.
+ * Retries on 5xx (Server Unavailable/Demand Spikes) and 429 (Rate Limit).
+ */
+async function retryWithBackoff<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 1500): Promise<T> {
+  let lastError: any;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.status || err?.error?.code;
+      
+      // Retry for server errors (500, 503, etc.) or rate limits (429)
+      if ((status >= 500 && status <= 599) || status === 429) {
+        const delay = baseDelay * Math.pow(2, i);
+        console.warn(`Gemini API busy (Status: ${status}). Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      // For other errors (4xx client errors), throw immediately
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 let activeChat: Chat | null = null;
 
 export const startAssistantChat = () => {
+  // Use gemini-flash-lite-latest as per aliases guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   activeChat = ai.chats.create({
-    model: 'gemini-2.5-flash-lite-latest',
+    model: 'gemini-flash-lite-latest',
     config: {
       systemInstruction: `You are the Virtual Site Engineer for Ajay Infra, Hyderabad. 
       You are an expert in construction materials (UltraTech, Vizag Steel, Ashirvad pipes, Asian Paints).
@@ -55,6 +83,7 @@ export const startAssistantChat = () => {
 
 export const sendMessageToAssistant = async (message: string) => {
   if (!activeChat) startAssistantChat();
+  // Streaming requests are retried differently; for now, we rely on the lite model's stability.
   const response = await activeChat!.sendMessageStream({ message });
   return response;
 };
@@ -75,7 +104,8 @@ export const getConstructionEstimate = async (
   Return strictly as JSON. Ensure prices reflect the current 2026 market trends in Hyderabad.`;
 
   try {
-    const response = await ai.models.generateContent({
+    // FIX: Added explicit generic type GenerateContentResponse to retryWithBackoff to ensure 'response' is correctly typed.
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: prompt,
       config: {
@@ -108,16 +138,17 @@ export const getConstructionEstimate = async (
           required: ["category", "materials", "totalEstimatedCost", "laborCost", "estimatedDays", "visualPrompt"]
         }
       }
-    });
+    }));
 
+    // FIX: Using .text property instead of method as per GenAI SDK guidelines
     const text = response.text?.trim();
     if (!text) throw new Error("Empty response from AI model.");
     const result = JSON.parse(text);
     cache.set(cacheKey, result);
     return result;
   } catch (error) {
-    console.error("Gemini Content Error:", error);
-    throw new Error("Failed to generate estimate.");
+    console.error("Gemini Content Error after retries:", error);
+    throw new Error("The estimation service is currently under heavy load. Please try again in a few minutes.");
   }
 };
 
@@ -128,14 +159,16 @@ export const generateDesignImage = async (category: string, visualPrompt: string
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   try {
-    const response = await ai.models.generateContent({
+    // FIX: Added explicit generic type GenerateContentResponse to retryWithBackoff to ensure 'response' is correctly typed.
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
         parts: [{ text: `High-quality architect render for ${category}: ${visualPrompt}. Realistic materials, photorealistic.` }]
       },
       config: { imageConfig: { aspectRatio: "16:9" } }
-    });
+    }));
     
+    // FIX: response is now typed as GenerateContentResponse, allowing access to candidates property
     const candidates = response.candidates;
     const imagePart = candidates?.[0]?.content?.parts?.find(p => p.inlineData);
     const base64 = imagePart?.inlineData?.data;
@@ -146,7 +179,7 @@ export const generateDesignImage = async (category: string, visualPrompt: string
       return dataUrl;
     }
   } catch (e) { 
-    console.error("Gemini Image Error:", e);
+    console.error("Gemini Image Error after retries:", e);
   }
   return null;
 };
@@ -157,7 +190,8 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   try {
-    const response = await ai.models.generateContent({
+    // FIX: Added explicit generic type GenerateContentResponse to retryWithBackoff to ensure 'response' is correctly typed.
+    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: "Current 2026 Construction Market Price Index for Hyderabad (Cement, Steel, Tiles, Plumbing, Electrical).",
       config: { 
@@ -193,19 +227,27 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
           required: ["lastUpdated", "categories"]
         }
       }
-    });
+    }));
     
+    // FIX: Using .text property instead of method as per GenAI SDK guidelines
     const text = response.text?.trim();
     if (!text) throw new Error("Empty response from market API.");
     const result = JSON.parse(text);
     cache.set('market_prices', result);
     return result;
   } catch (error) {
-    console.error("Gemini Market Error:", error);
+    console.error("Gemini Market Error after retries:", error);
+    // Return a safe local fallback if the API is completely down
     return {
       lastUpdated: new Date().toISOString(),
       categories: [
-        { title: "Basics", items: [{ category: "Basics", brandName: "UltraTech", specificType: "PPC Cement", priceWithGst: 415, unit: "bag", trend: "stable" }] }
+        { 
+          title: "Critical Basics (Offline Data)", 
+          items: [
+            { category: "Basics", brandName: "UltraTech", specificType: "PPC Cement", priceWithGst: 415, unit: "bag", trend: "stable" },
+            { category: "Basics", brandName: "Vizag Steel", specificType: "12mm TMT", priceWithGst: 72400, unit: "ton", trend: "stable" }
+          ] 
+        }
       ]
     };
   }

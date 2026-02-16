@@ -4,6 +4,7 @@ import { EstimationResult, TaskConfig, MarketPriceList, UserData } from './types
 import { CONSTRUCTION_TASKS } from './constants';
 import { getConstructionEstimate, generateDesignImage, getRawMaterialPriceList, sendMessageToAssistant } from './services/geminiService';
 import { notifyCloud } from './services/notificationService';
+import { GenerateContentResponse } from '@google/genai';
 
 const UPI_ID = "ajay.t.me@icici";
 const BRAND_NAME = "Ajay Infra";
@@ -37,7 +38,8 @@ const ChatBot = ({ isVisible, onClose }: { isVisible: boolean, onClose: () => vo
       setMessages(prev => [...prev, { role: 'bot', text: "" }]);
       
       for await (const chunk of stream) {
-        fullText += (chunk as any).text;
+        const c = chunk as GenerateContentResponse;
+        fullText += c.text || "";
         setMessages(prev => {
           const newMsgs = [...prev];
           newMsgs[newMsgs.length - 1].text = fullText;
@@ -152,7 +154,6 @@ const App: React.FC = () => {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [cooldownTimeLeft]);
 
-  // Log whenever someone opens premium page
   useEffect(() => {
     if (view === 'upgrade' && !isUpgraded) {
       notifyCloud('upgrade', { user: userData || { name: 'Anonymous', phone: 'Attempting Upgrade' }, details: "User opened premium services page" });
@@ -427,9 +428,23 @@ const App: React.FC = () => {
               <div className="lg:col-span-12 space-y-12">
                 <div className="bg-white p-10 rounded-[3rem] border-l-[12px] border-[#1E3A8A] shadow-xl animate-in slide-in-from-left duration-700 bg-gradient-to-r from-white to-blue-50/20">
                   <p className="text-[#1E3A8A] font-black uppercase tracking-[0.2em] text-[10px] mb-2">{userData?.name ? 'Verified Session' : 'Smart Engineering Portal'}</p>
-                  <h2 className="text-5xl font-black tracking-tighter leading-none">{userData?.name ? `Hello Welcome, ${userData.name}!` : `Ajay Infra Portal`}</h2>
-                  <p className="text-slate-500 text-sm font-medium mt-3">{userData?.name ? `Ready to analyze your project in ${userData.location}?` : 'Calculate construction quotes with real-time 2026 price accuracy.'}</p>
+                  <h2 className="text-5xl font-black tracking-tighter leading-none">{userData?.name ? `Welcome back to Ajay Infra, ${userData.name}!` : `Ajay Infra Engineering`}</h2>
+                  <p className="text-slate-500 text-sm font-medium mt-3">{userData?.name ? `Ready to analyze your next project in ${userData.location}?` : 'Calculate construction quotes with real-time 2026 price accuracy.'}</p>
                 </div>
+
+                {/* BRAND REINFORCEMENT SECTION FOR SEO */}
+                {!userData?.name && (
+                  <div className="bg-white p-10 rounded-[3rem] shadow-sm border animate-in fade-in duration-1000">
+                    <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-4">About Ajay Infra</h2>
+                    <p className="text-slate-600 text-sm font-medium leading-relaxed max-w-4xl italic">
+                      At <strong className="text-[#1E3A8A]">Ajay Infra</strong>, we represent the gold standard in Hyderabad's construction engineering and real estate consultancy. 
+                      Our portal is specifically designed for agents to access the <strong className="text-[#1E3A8A]">Ajay Infra</strong> proprietary 2026 construction market index. 
+                      When you choose <strong className="text-[#1E3A8A]">Ajay Infra</strong>, you are partnering with a leader in Hyderabad's Troop Bazar pricing logistics, 
+                      ensuring every house and flat build is optimized for maximum efficiency and transparency.
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid md:grid-cols-3 gap-8 animate-in slide-in-from-bottom-8 duration-500">
                   {CONSTRUCTION_TASKS.map(task => (
                     <button key={task.id} onClick={() => { setSelectedTask(task); setEstimate(null); }} className="bg-white p-12 rounded-[4rem] border shadow-sm hover:shadow-2xl transition-all text-left group">
