@@ -7,7 +7,7 @@ import { notifyCloud } from './services/notificationService';
 import { GenerateContentResponse } from '@google/genai';
 
 const UPI_ID = "ajay.t.me@icici";
-const BRAND_NAME = "Ajay Infra";
+const BRAND_NAME = "Ajay Projects";
 const FREE_LIMIT = 3;
 const UPGRADE_PRICE = 499;
 const COOLDOWN_MINUTES = 5;
@@ -15,7 +15,7 @@ const COOLDOWN_MINUTES = 5;
 // ChatBot UI Component
 const ChatBot = ({ isVisible, onClose }: { isVisible: boolean, onClose: () => void }) => {
   const [messages, setMessages] = useState<{ role: 'user' | 'bot', text: string }[]>([
-    { role: 'bot', text: "Hello! I'm Ajay's Virtual Site Engineer. How can I help you with your construction project today?" }
+    { role: 'bot', text: "Hello! I'm the Virtual Site Engineer for Ajay Projects. How can I help you with your construction project today?" }
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -47,7 +47,7 @@ const ChatBot = ({ isVisible, onClose }: { isVisible: boolean, onClose: () => vo
         });
       }
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'bot', text: "I'm having trouble connecting to the site server. Please try again." }]);
+      setMessages(prev => [...prev, { role: 'bot', text: "I'm having trouble connecting to the Ajay Projects server. Please try again." }]);
     } finally {
       setIsTyping(false);
     }
@@ -176,7 +176,7 @@ const App: React.FC = () => {
     };
     triggerSyncFeedback("Syncing Callback...");
     await notifyCloud('callback', { user, task: selectedTask?.title || "General Support", total: estimate?.totalEstimatedCost || 0, details: estimate?.materials || null, inputs: formInputs });
-    alert(`Hello ${user.name}, your request has been sent to Ajay Infra. We will call you on ${user.phone} shortly.`);
+    alert(`Hello ${user.name}, your request has been sent to Ajay Projects. We will call you on ${user.phone} shortly.`);
   };
 
   const handleNotifyWorkOrder = async () => {
@@ -189,7 +189,7 @@ const App: React.FC = () => {
     };
     triggerSyncFeedback("Sending Work Order...");
     await notifyCloud('work_order', { user, task: selectedTask?.title, total: estimate.totalEstimatedCost, materials: estimate.materials, inputs: formInputs });
-    alert("Project Start Notified! Ajay has received your work order and invoice details.");
+    alert("Project Start Notified! Ajay Projects has received your work order and invoice details.");
   };
 
   const handleViewInvoice = async () => {
@@ -428,19 +428,19 @@ const App: React.FC = () => {
               <div className="lg:col-span-12 space-y-12">
                 <div className="bg-white p-10 rounded-[3rem] border-l-[12px] border-[#1E3A8A] shadow-xl animate-in slide-in-from-left duration-700 bg-gradient-to-r from-white to-blue-50/20">
                   <p className="text-[#1E3A8A] font-black uppercase tracking-[0.2em] text-[10px] mb-2">{userData?.name ? 'Verified Session' : 'Smart Engineering Portal'}</p>
-                  <h2 className="text-5xl font-black tracking-tighter leading-none">{userData?.name ? `Welcome back to Ajay Infra, ${userData.name}!` : `Ajay Infra Engineering`}</h2>
+                  <h2 className="text-5xl font-black tracking-tighter leading-none">{userData?.name ? `Welcome back to Ajay Projects, ${userData.name}!` : `Ajay Projects Engineering`}</h2>
                   <p className="text-slate-500 text-sm font-medium mt-3">{userData?.name ? `Ready to analyze your next project in ${userData.location}?` : 'Calculate construction quotes with real-time 2026 price accuracy.'}</p>
                 </div>
 
                 {/* BRAND REINFORCEMENT SECTION FOR SEO */}
                 {!userData?.name && (
                   <div className="bg-white p-10 rounded-[3rem] shadow-sm border animate-in fade-in duration-1000">
-                    <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-4">About Ajay Infra</h2>
+                    <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-4">About Ajay Projects</h2>
                     <p className="text-slate-600 text-sm font-medium leading-relaxed max-w-4xl italic">
-                      At <strong className="text-[#1E3A8A]">Ajay Infra</strong>, we represent the gold standard in Hyderabad's construction engineering and real estate consultancy. 
-                      Our portal is specifically designed for agents to access the <strong className="text-[#1E3A8A]">Ajay Infra</strong> proprietary 2026 construction market index. 
-                      When you choose <strong className="text-[#1E3A8A]">Ajay Infra</strong>, you are partnering with a leader in Hyderabad's Troop Bazar pricing logistics, 
-                      ensuring every house and flat build is optimized for maximum efficiency and transparency.
+                      At <strong className="text-[#1E3A8A]">Ajay Projects</strong>, we represent the gold standard in Hyderabad's construction engineering and real estate consultancy. 
+                      Our portal is specifically designed for agents to access the <strong className="text-[#1E3A8A]">Ajay Projects</strong> proprietary 2026 construction market index. 
+                      When you choose <strong className="text-[#1E3A8A]">Ajay Projects</strong>, you are partnering with a leader in Hyderabad's Troop Bazar pricing logistics, 
+                      ensuring every house and flat build is optimized for maximum efficiency and transparency. Experience the future of infrastructure at <strong className="text-[#1E3A8A]">ajayprojects.com</strong>.
                     </p>
                   </div>
                 )}

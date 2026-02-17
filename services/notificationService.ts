@@ -17,8 +17,8 @@ export const notifyCloud = async (event: CloudEvent, data: any) => {
   const payload = {
     event,
     timestamp: new Date().toISOString(),
-    project: "Ajay Infra - Hyderabad",
-    domain: "ajayinfra.com",
+    project: "Ajay Projects - Hyderabad",
+    domain: "ajayprojects.com",
     user: userContext ? {
       name: userContext.name || "N/A",
       phone: userContext.phone || "N/A",

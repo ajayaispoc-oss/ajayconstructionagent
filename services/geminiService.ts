@@ -66,15 +66,17 @@ async function retryWithBackoff<T>(fn: () => Promise<T>, maxRetries = 3, baseDel
 let activeChat: Chat | null = null;
 
 export const startAssistantChat = () => {
-  // Use gemini-flash-lite-latest as per aliases guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   activeChat = ai.chats.create({
     model: 'gemini-flash-lite-latest',
     config: {
-      systemInstruction: `You are the Virtual Site Engineer for Ajay Infra, Hyderabad. 
+      systemInstruction: `You are the Virtual Site Engineer for Ajay Projects, based at ajayprojects.com. 
       You are an expert in construction materials (UltraTech, Vizag Steel, Ashirvad pipes, Asian Paints).
-      Your tone is professional, helpful, and localized to Hyderabad (mentioning areas like Madhapur, Gachibowli, Troop Bazar).
+      Your core mission is to assist clients with construction inquiries, project updates, and building estimates.
+      If you generate any links for the user (like for a Contact Us page or a Project Gallery), ensure they use the base URL https://ajayprojects.com/.
+      Your tone is professional, reliable, and localized to Hyderabad (mentioning areas like Madhapur, Gachibowli, Troop Bazar).
       If the user asks for a price, refer to current 2026 market trends. 
+      Always refer to the business as 'Ajay Projects' or 'ajayprojects.com'. Do not use the old name 'ajayinfra' anymore.
       Always encourage the user to generate a 'Professional Quote' using the tools on the left if they need exact numbers.`,
     },
   });
@@ -83,7 +85,6 @@ export const startAssistantChat = () => {
 
 export const sendMessageToAssistant = async (message: string) => {
   if (!activeChat) startAssistantChat();
-  // Streaming requests are retried differently; for now, we rely on the lite model's stability.
   const response = await activeChat!.sendMessageStream({ message });
   return response;
 };
@@ -104,7 +105,6 @@ export const getConstructionEstimate = async (
   Return strictly as JSON. Ensure prices reflect the current 2026 market trends in Hyderabad.`;
 
   try {
-    // FIX: Added explicit generic type GenerateContentResponse to retryWithBackoff to ensure 'response' is correctly typed.
     const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: prompt,
@@ -140,7 +140,6 @@ export const getConstructionEstimate = async (
       }
     }));
 
-    // FIX: Using .text property instead of method as per GenAI SDK guidelines
     const text = response.text?.trim();
     if (!text) throw new Error("Empty response from AI model.");
     const result = JSON.parse(text);
@@ -159,7 +158,6 @@ export const generateDesignImage = async (category: string, visualPrompt: string
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   try {
-    // FIX: Added explicit generic type GenerateContentResponse to retryWithBackoff to ensure 'response' is correctly typed.
     const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
@@ -168,7 +166,6 @@ export const generateDesignImage = async (category: string, visualPrompt: string
       config: { imageConfig: { aspectRatio: "16:9" } }
     }));
     
-    // FIX: response is now typed as GenerateContentResponse, allowing access to candidates property
     const candidates = response.candidates;
     const imagePart = candidates?.[0]?.content?.parts?.find(p => p.inlineData);
     const base64 = imagePart?.inlineData?.data;
@@ -190,7 +187,6 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   try {
-    // FIX: Added explicit generic type GenerateContentResponse to retryWithBackoff to ensure 'response' is correctly typed.
     const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: "Current 2026 Construction Market Price Index for Hyderabad (Cement, Steel, Tiles, Plumbing, Electrical).",
@@ -229,7 +225,6 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
       }
     }));
     
-    // FIX: Using .text property instead of method as per GenAI SDK guidelines
     const text = response.text?.trim();
     if (!text) throw new Error("Empty response from market API.");
     const result = JSON.parse(text);
@@ -237,7 +232,6 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
     return result;
   } catch (error) {
     console.error("Gemini Market Error after retries:", error);
-    // Return a safe local fallback if the API is completely down
     return {
       lastUpdated: new Date().toISOString(),
       categories: [
