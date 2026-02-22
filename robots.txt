@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Host
+Host: https://ajayprojects.com
+
+# Sitemap Location
+Sitemap: https://ajayprojects.com/sitemap.xml

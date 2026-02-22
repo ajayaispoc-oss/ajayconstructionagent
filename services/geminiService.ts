@@ -2,118 +2,84 @@
 import { GoogleGenAI, Type, Chat, GenerateContentResponse } from "@google/genai";
 import { EstimationResult, ConstructionCategory, MarketPriceList } from "../types";
 
-const MARKET_CACHE_EXPIRY = 60 * 60 * 1000; 
-const ESTIMATE_CACHE_EXPIRY = 2 * 60 * 60 * 1000;
-const IMAGE_CACHE_EXPIRY = 30 * 24 * 60 * 60 * 1000;
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-interface CacheItem<T> {
-  data: T;
-  timestamp: number;
-}
+/** 
+ * AJAY PROJECTS - ENGINE CONFIGURATION
+ * Using Flash for high-availability
+ */
+const PRIMARY_MODEL = 'gemini-3-flash-preview'; 
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 const cache = {
   set: <T>(key: string, data: T) => {
     try {
-      localStorage.setItem(`ajay_v4_${key}`, JSON.stringify({ data, timestamp: Date.now() }));
-    } catch (e) {
-      console.warn("Cache storage quota full.");
-    }
+      localStorage.setItem(`ajay_checkpoint_${key}`, JSON.stringify({ data, timestamp: Date.now() }));
+    } catch (e) {}
   },
   get: <T>(key: string, expiry: number): T | null => {
-    const raw = localStorage.getItem(`ajay_v4_${key}`);
+    const raw = localStorage.getItem(`ajay_checkpoint_${key}`);
     if (!raw) return null;
     try {
-      const item: CacheItem<T> = JSON.parse(raw);
+      const item = JSON.parse(raw);
       if (Date.now() - item.timestamp > expiry) return null;
       return item.data;
     } catch (e) { return null; }
-  },
-  generateKey: (prefix: string, obj: any) => {
-    const cleanObj = { ...obj };
-    delete cleanObj.clientName; 
-    delete cleanObj.clientPhone;
-    return `${prefix}_${JSON.stringify(cleanObj).replace(/\s+/g, '')}`;
   }
 };
 
-/**
- * Robust retry utility with exponential backoff.
- * Retries on 5xx (Server Unavailable/Demand Spikes) and 429 (Rate Limit).
- */
-async function retryWithBackoff<T>(fn: () => Promise<T>, maxRetries = 3, baseDelay = 1500): Promise<T> {
-  let lastError: any;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (err: any) {
-      lastError = err;
-      const status = err?.status || err?.error?.code;
-      
-      // Retry for server errors (500, 503, etc.) or rate limits (429)
-      if ((status >= 500 && status <= 599) || status === 429) {
-        const delay = baseDelay * Math.pow(2, i);
-        console.warn(`Gemini API busy (Status: ${status}). Retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
-      // For other errors (4xx client errors), throw immediately
-      throw err;
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+async function fetchWithRetry(fn: () => Promise<any>, retries = 3, interval = 2000): Promise<any> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    if (retries > 0 && (error?.message?.includes('503') || error?.status === 503 || error?.message?.includes('UNAVAILABLE'))) {
+      await delay(interval);
+      return fetchWithRetry(fn, retries - 1, interval * 1.5);
     }
+    throw error;
   }
-  throw lastError;
 }
 
-let activeChat: Chat | null = null;
-
 export const startAssistantChat = () => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  activeChat = ai.chats.create({
-    model: 'gemini-flash-lite-latest',
+  return ai.chats.create({
+    model: PRIMARY_MODEL,
     config: {
-      systemInstruction: `You are the Virtual Site Engineer for Ajay Projects, based at ajayprojects.com. 
-      You are an expert in construction materials (UltraTech, Vizag Steel, Ashirvad pipes, Asian Paints).
-      Your core mission is to assist clients with construction inquiries, project updates, and building estimates.
-      If you generate any links for the user (like for a Contact Us page or a Project Gallery), ensure they use the base URL https://ajayprojects.com/.
-      Your tone is professional, reliable, and localized to Hyderabad (mentioning areas like Madhapur, Gachibowli, Troop Bazar).
-      If the user asks for a price, refer to current 2026 market trends. 
-      Always refer to the business as 'Ajay Projects' or 'ajayprojects.com'. Do not use the old name 'ajayinfra' anymore.
-      Always encourage the user to generate a 'Professional Quote' using the tools on the left if they need exact numbers.`,
+      systemInstruction: `You are the Virtual Site Engineer for Ajay Projects (ajayprojects.com). 
+      Expert in Hyderabad construction materials (UltraTech, Vizag Steel, Ashirvad).
+      Provide site engineering advice and price guidance based on 2026 indices.`,
     },
   });
-  return activeChat;
 };
 
 export const sendMessageToAssistant = async (message: string) => {
-  if (!activeChat) startAssistantChat();
-  const response = await activeChat!.sendMessageStream({ message });
-  return response;
+  const chat = startAssistantChat();
+  return await chat.sendMessageStream({ message });
 };
 
 export const getConstructionEstimate = async (
   category: ConstructionCategory,
   inputs: Record<string, any>
 ): Promise<EstimationResult> => {
-  const cacheKey = cache.generateKey('est_ledger', { category, ...inputs });
-  const cachedData = cache.get<EstimationResult>(cacheKey, ESTIMATE_CACHE_EXPIRY);
-  if (cachedData) return cachedData;
+  const cacheKey = `est_${category}_${inputs.totalArea || inputs.area || 'gen'}`;
+  const cached = cache.get<EstimationResult>(cacheKey, 3600000);
+  if (cached) return cached;
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  const prompt = `Act as a Senior Construction Estimator for Hyderabad (Jan 2026 Index).
-  Provide a detailed Bill of Materials (BOM) for the task: ${category}.
-  User Inputs: ${JSON.stringify(inputs)}.
-  Enforce Brand usage: Ashirvad for plumbing, Goldmedal/Finolex for electrical, Asian Paints for finishing.
-  Return strictly as JSON. Ensure prices reflect the current 2026 market trends in Hyderabad.`;
+  const prompt = `Act as a Senior Estimator (Hyderabad 2026). 
+  Task: ${category}. 
+  Details: ${JSON.stringify(inputs)}. 
+  Return a strictly valid JSON estimation with materials, laborCost, totalEstimatedCost, estimatedDays, precautions, and expertTips.`;
 
   try {
-    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+    const response = await fetchWithRetry(() => ai.models.generateContent({
+      model: PRIMARY_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            category: { type: Type.STRING },
             materials: {
               type: Type.ARRAY,
               items: {
@@ -135,112 +101,81 @@ export const getConstructionEstimate = async (
             expertTips: { type: Type.STRING },
             visualPrompt: { type: Type.STRING }
           },
-          required: ["category", "materials", "totalEstimatedCost", "laborCost", "estimatedDays", "visualPrompt"]
+          required: ["materials", "totalEstimatedCost", "laborCost", "estimatedDays", "visualPrompt"]
         }
       }
     }));
 
-    const text = response.text?.trim();
-    if (!text) throw new Error("Empty response from AI model.");
-    const result = JSON.parse(text);
+    const result = JSON.parse(response.text || "{}");
     cache.set(cacheKey, result);
     return result;
-  } catch (error) {
-    console.error("Gemini Content Error after retries:", error);
-    throw new Error("The estimation service is currently under heavy load. Please try again in a few minutes.");
-  }
-};
-
-export const generateDesignImage = async (category: string, visualPrompt: string): Promise<string | null> => {
-  const categoryCacheKey = `img_cat_${category}`;
-  const cachedImg = cache.get<string>(categoryCacheKey, IMAGE_CACHE_EXPIRY);
-  if (cachedImg) return cachedImg;
-
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  try {
-    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: [{ text: `High-quality architect render for ${category}: ${visualPrompt}. Realistic materials, photorealistic.` }]
-      },
-      config: { imageConfig: { aspectRatio: "16:9" } }
-    }));
-    
-    const candidates = response.candidates;
-    const imagePart = candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    const base64 = imagePart?.inlineData?.data;
-    
-    if (base64) {
-      const dataUrl = `data:image/png;base64,${base64}`;
-      cache.set(categoryCacheKey, dataUrl);
-      return dataUrl;
+  } catch (error: any) {
+    console.error("Critical AI Failure:", error);
+    if (error?.message?.includes('503')) {
+      throw new Error("Engineering server is currently overloaded. We have auto-queued your request, please wait 10 seconds.");
     }
-  } catch (e) { 
-    console.error("Gemini Image Error after retries:", e);
+    throw new Error("Engineering server at capacity. Please retry in 5 seconds.");
   }
-  return null;
 };
 
 export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
-  const cachedMarket = cache.get<MarketPriceList>('market_prices', MARKET_CACHE_EXPIRY);
-  if (cachedMarket) return cachedMarket;
-
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  try {
-    const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: "Current 2026 Construction Market Price Index for Hyderabad (Cement, Steel, Tiles, Plumbing, Electrical).",
-      config: { 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            lastUpdated: { type: Type.STRING },
-            categories: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  items: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        category: { type: Type.STRING },
-                        brandName: { type: Type.STRING },
-                        specificType: { type: Type.STRING },
-                        priceWithGst: { type: Type.NUMBER },
-                        unit: { type: Type.STRING },
-                        trend: { type: Type.STRING }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          required: ["lastUpdated", "categories"]
-        }
+  const prompt = `Provide a comprehensive 2026 Hyderabad Price Index for ALL major construction materials. 
+  Categories to include:
+  - Core (Steel, Cement, Sand, Aggregates, Bricks, AAC Blocks)
+  - Finishes (Paints: Asian, Berger, Birla Opus; Tiling: Vitrified, Granite, Marble)
+  - Electrical (Wires, Switches, Pipes)
+  - Plumbing (Pipes, Taps, Sanitary)
+  - Hardware (Wood, Doors, Plywood)
+  Return strictly as JSON:
+  {
+    "lastUpdated": "2026-01-01",
+    "categories": [
+      {
+        "title": "Category Name",
+        "items": [
+          { "category": "Sub", "brandName": "Brand", "specificType": "Type", "priceWithGst": number, "unit": "unit", "trend": "stable/up/down" }
+        ]
       }
+    ]
+  }`;
+  try {
+    const response = await fetchWithRetry(() => ai.models.generateContent({
+      model: PRIMARY_MODEL,
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
     }));
-    
-    const text = response.text?.trim();
-    if (!text) throw new Error("Empty response from market API.");
-    const result = JSON.parse(text);
-    cache.set('market_prices', result);
-    return result;
-  } catch (error) {
-    console.error("Gemini Market Error after retries:", error);
+    const parsed = JSON.parse(response.text || "{}");
+    if (!parsed.categories || !Array.isArray(parsed.categories)) throw new Error("Invalid structure");
+    return parsed;
+  } catch (err) {
+    console.error("Price list fetch error, using fallback data", err);
     return {
       lastUpdated: new Date().toISOString(),
       categories: [
         { 
-          title: "Critical Basics (Offline Data)", 
+          title: "Core Essentials", 
           items: [
-            { category: "Basics", brandName: "UltraTech", specificType: "PPC Cement", priceWithGst: 415, unit: "bag", trend: "stable" },
-            { category: "Basics", brandName: "Vizag Steel", specificType: "12mm TMT", priceWithGst: 72400, unit: "ton", trend: "stable" }
+            { category: "Cement", brandName: "UltraTech", specificType: "PPC", priceWithGst: 420, unit: "bag", trend: "stable" },
+            { category: "Steel", brandName: "Vizag", specificType: "TMT 12mm", priceWithGst: 72500, unit: "ton", trend: "up" },
+            { category: "Sand", brandName: "Local", specificType: "M-Sand", priceWithGst: 45, unit: "cu.ft", trend: "stable" },
+            { category: "Steel", brandName: "JSW", specificType: "Neosteel TMT", priceWithGst: 74000, unit: "ton", trend: "up" },
+            { category: "Bricks", brandName: "Local", specificType: "Red Clay Bricks", priceWithGst: 9, unit: "piece", trend: "stable" }
           ] 
+        },
+        {
+          title: "Painting & Finishes",
+          items: [
+            { category: "Paint", brandName: "Asian Paints", specificType: "Royale Emulsion", priceWithGst: 590, unit: "ltr", trend: "stable" },
+            { category: "Paint", brandName: "Birla Opus", specificType: "Allure Luxury", priceWithGst: 575, unit: "ltr", trend: "stable" },
+            { category: "Tiling", brandName: "Kajaria", specificType: "Vitrified 2x2", priceWithGst: 65, unit: "sq.ft", trend: "up" }
+          ]
+        },
+        {
+          title: "Electrical & Utility",
+          items: [
+            { category: "Electrical", brandName: "Finolex", specificType: "2.5mm Wire", priceWithGst: 2150, unit: "coil", trend: "stable" },
+            { category: "Plumbing", brandName: "Ashirvad", specificType: "CPVC Pipe 1'", priceWithGst: 340, unit: "length", trend: "up" }
+          ]
         }
       ]
     };

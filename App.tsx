@@ -1,566 +1,689 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { EstimationResult, TaskConfig, MarketPriceList, UserData } from './types';
+import { EstimationResult, TaskConfig, MarketPriceList } from './types';
 import { CONSTRUCTION_TASKS } from './constants';
-import { getConstructionEstimate, generateDesignImage, getRawMaterialPriceList, sendMessageToAssistant } from './services/geminiService';
+import { getConstructionEstimate, getRawMaterialPriceList, sendMessageToAssistant } from './services/geminiService';
 import { notifyCloud } from './services/notificationService';
-import { GenerateContentResponse } from '@google/genai';
+import { supabase } from './services/supabaseClient';
 
-const UPI_ID = "ajay.t.me@icici";
 const BRAND_NAME = "Ajay Projects";
-const FREE_LIMIT = 3;
-const UPGRADE_PRICE = 499;
-const COOLDOWN_MINUTES = 5;
+const UPI_ID = "ajay.t.me@icici";
+const SUPPORT_EMAIL = "ajay.ai.spoc@gmail.com";
+const GUEST_LIMIT = 3;
+const SUBSCRIPTION_FEE = 499;
 
-// ChatBot UI Component
-const ChatBot = ({ isVisible, onClose }: { isVisible: boolean, onClose: () => void }) => {
-  const [messages, setMessages] = useState<{ role: 'user' | 'bot', text: string }[]>([
-    { role: 'bot', text: "Hello! I'm the Virtual Site Engineer for Ajay Projects. How can I help you with your construction project today?" }
-  ]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+// --- AUTHENTICATION SCREEN ---
+const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?: (phone: string) => void, onSignupSuccess: () => void, forceLogin?: boolean }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [location, setLocation] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
+  const [isGuestPhonePrompt, setIsGuestPhonePrompt] = useState(false);
+  const [guestPhone, setGuestPhone] = useState('');
 
-  useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const handleSend = async () => {
-    if (!input.trim() || isTyping) return;
-    const userMsg = input;
-    setInput("");
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
-    setIsTyping(true);
-
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage(null);
     try {
-      const stream = await sendMessageToAssistant(userMsg);
-      let fullText = "";
-      setMessages(prev => [...prev, { role: 'bot', text: "" }]);
-      
-      for await (const chunk of stream) {
-        const c = chunk as GenerateContentResponse;
-        fullText += c.text || "";
-        setMessages(prev => {
-          const newMsgs = [...prev];
-          newMsgs[newMsgs.length - 1].text = fullText;
-          return newMsgs;
+      if (isLogin) {
+        const { error, data } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        if (data.user) setMessage({ type: 'success', text: "Access granted. Synchronizing portal..." });
+      } else {
+        if (!fullName) throw new Error("Full Name required.");
+        if (!phone) throw new Error("Phone number required.");
+        if (!location) throw new Error("Location required.");
+        const { error, data } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: { data: { full_name: fullName, role: 'agent', phone, location } }
         });
+        if (error) throw error;
+        if (data.user) {
+          // DATABASE FIX: Aligned with schema: id, full_name, phone, location, is_premium
+          // We use a robust profile sync that handles cases where a trigger might have already fired.
+          const profileData = { 
+            id: data.user.id, 
+            full_name: fullName, 
+            is_premium: false,
+            phone: phone,
+            location: location
+          };
+
+          // Robust profile sync: Try to insert first.
+          const { error: insertError } = await supabase.from('profiles').insert(profileData);
+          
+          if (insertError) {
+            // If it already exists (likely created by a trigger), update the existing record
+            if (insertError.code === '23505') {
+              const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ 
+                  full_name: fullName, 
+                  phone: phone, 
+                  location: location 
+                })
+                .eq('id', data.user.id);
+              
+              if (updateError) {
+                console.error("Profile update failed:", updateError);
+                setMessage({ type: 'error', text: "Account created but profile sync failed. Please contact admin." });
+                return;
+              }
+            } else {
+              console.error("Profile insert failed:", insertError);
+              setMessage({ type: 'error', text: "Account created but profile sync failed. Please contact admin." });
+              return;
+            }
+          }
+          
+          setMessage({ type: 'success', text: `Registration successful. Access granted.` });
+          onSignupSuccess();
+        }
       }
-    } catch (e) {
-      setMessages(prev => [...prev, { role: 'bot', text: "I'm having trouble connecting to the Ajay Projects server. Please try again." }]);
-    } finally {
-      setIsTyping(false);
-    }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || "Auth failed." });
+    } finally { setLoading(false); }
   };
 
-  if (!isVisible) return null;
+  const handleGuestSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (guestPhone.length < 10) {
+      setMessage({ type: 'error', text: 'Please enter a valid 10-digit mobile number.' });
+      return;
+    }
+    if (onGuestMode) onGuestMode(guestPhone);
+  };
+
+  if (isGuestPhonePrompt) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F9FBFF] p-6 animate-in">
+        <div className="max-w-md w-full bg-white rounded-[3.5rem] shadow-2xl p-10 sm:p-14 border border-slate-100">
+          <div className="text-center mb-10">
+            <div className="bg-[#1E3A8A] w-20 h-20 rounded-[2rem] flex items-center justify-center text-4xl text-white mx-auto mb-6 shadow-xl">📞</div>
+            <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter">Guest Registration</h2>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Required for project tracking</p>
+          </div>
+          {message && <div className={`mb-8 p-5 rounded-[1.5rem] text-[11px] font-bold uppercase text-center border ${message.type === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>{message.text}</div>}
+          <form onSubmit={handleGuestSubmit} className="space-y-4">
+            <input required type="tel" placeholder="Your Mobile Number" className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.5rem] px-6 py-4 text-xs font-bold outline-none transition-all" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} />
+            <button type="submit" className="w-full bg-[#1E3A8A] text-white py-5 rounded-[1.5rem] text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">Start Guest Session</button>
+            <button type="button" onClick={() => setIsGuestPhonePrompt(false)} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">← Back to Login</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="fixed bottom-24 right-6 w-[400px] h-[600px] bg-white rounded-[2.5rem] shadow-2xl border z-[1000] flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 duration-500 backdrop-blur-xl bg-white/95">
-      <div className="bg-[#1E3A8A] p-6 text-white flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-xl">🤖</div>
-          <div>
-            <h4 className="font-black uppercase text-[10px] tracking-widest">Ajay Assistant</h4>
-            <p className="text-[8px] opacity-60 uppercase font-bold">Virtual Site Engineer • Online</p>
-          </div>
+    <div className="min-h-screen flex items-center justify-center bg-[#F9FBFF] p-6 animate-in">
+      <div className="max-w-md w-full bg-white rounded-[3.5rem] shadow-2xl p-10 sm:p-14 border border-slate-100">
+        <div className="text-center mb-10">
+          <div className="bg-[#1E3A8A] w-20 h-20 rounded-[2rem] flex items-center justify-center text-4xl text-white mx-auto mb-6 shadow-xl">🏗️</div>
+          <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter">{BRAND_NAME}</h1>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Engineering Portal v2026</p>
         </div>
-        <button onClick={onClose} className="text-xl opacity-60 hover:opacity-100">✕</button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] p-4 rounded-3xl text-xs font-medium leading-relaxed ${m.role === 'user' ? 'bg-[#1E3A8A] text-white rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none'}`}>
-              {m.text}
+        {message && <div className={`mb-8 p-5 rounded-[1.5rem] text-[11px] font-bold uppercase text-center border ${message.type === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>{message.text}</div>}
+        
+        {!isLogin && (
+          <div className="mb-8 p-6 bg-blue-50/50 rounded-[2rem] border border-blue-100 text-center">
+            <h3 className="text-[11px] font-black uppercase text-[#1E3A8A] mb-4 tracking-widest">Scan to Pay One-Time Fee: ₹499</h3>
+            <div className="bg-white p-3 rounded-2xl inline-block shadow-md mb-2 border border-slate-100">
+              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${UPI_ID}&pn=Ajay%20Projects&am=499`)}`} className="w-32 h-32" alt="Subscription QR" />
             </div>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">VPA: {UPI_ID}</p>
           </div>
-        ))}
-        {isTyping && <div className="text-[10px] text-slate-400 font-black animate-pulse">SITE ENGINEER IS TYPING...</div>}
-        <div ref={scrollRef} />
-      </div>
-      <div className="p-4 bg-slate-50 border-t flex gap-2">
-        <input 
-          value={input} 
-          onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Ask about materials, prices, labor..." 
-          className="flex-1 bg-white border-2 border-slate-100 rounded-2xl px-4 py-3 text-xs outline-none focus:border-[#1E3A8A] font-bold"
-        />
-        <button onClick={handleSend} className="bg-[#1E3A8A] text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg active:scale-95 transition-transform">➤</button>
+        )}
+
+        <form onSubmit={handleAuth} className="space-y-4">
+          {!isLogin && (
+            <>
+              <input required type="text" placeholder="Full Name" className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.5rem] px-6 py-4 text-xs font-bold outline-none transition-all" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+              <input required type="tel" placeholder="Mobile Number" className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.5rem] px-6 py-4 text-xs font-bold outline-none transition-all" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <input required type="text" placeholder="Location (e.g. Troop Bazar)" className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.5rem] px-6 py-4 text-xs font-bold outline-none transition-all" value={location} onChange={(e) => setLocation(e.target.value)} />
+            </>
+          )}
+          <input required type="email" placeholder="Agent Email" className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.5rem] px-6 py-4 text-xs font-bold outline-none transition-all" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input required type="password" placeholder="Portal Password" className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.5rem] px-6 py-4 text-xs font-bold outline-none transition-all" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button type="submit" disabled={loading} className="w-full bg-[#1E3A8A] text-white py-5 rounded-[1.5rem] text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
+            {loading ? 'Verifying...' : isLogin ? 'Sign In' : 'Subscribe & Sign Up'}
+          </button>
+        </form>
+        <div className="mt-8 text-center">
+          <button onClick={() => setIsLogin(!isLogin)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-[#1E3A8A] transition-colors">{isLogin ? "New Agent? Sign Up" : "Registered Agent? Login"}</button>
+          {!forceLogin && onGuestMode && (
+            <div className="mt-6 pt-6 border-t border-slate-50">
+              <button onClick={() => setIsGuestPhonePrompt(true)} className="text-[10px] font-black text-[#1E3A8A] uppercase tracking-widest underline">Quick Access (Guest Mode)</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 };
 
+// --- CHATBOT COMPONENT ---
+const ChatBot = ({ isVisible, onClose }: { isVisible: boolean, onClose: () => void }) => {
+  const [messages, setMessages] = useState<{ role: 'user' | 'bot', text: string }[]>([
+    { role: 'bot', text: "Hello! I'm the Ajay Projects AI Assistant. How can I help with your construction planning today?" }
+  ]);
+  const [input, setInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isTyping) return;
+    const msg = input;
+    setInput("");
+    setMessages(prev => [...prev, { role: 'user', text: msg }]);
+    setIsTyping(true);
+    try {
+      const stream = await sendMessageToAssistant(msg);
+      let fullText = "";
+      setMessages(prev => [...prev, { role: 'bot', text: "" }]);
+      for await (const chunk of stream) {
+        fullText += (chunk as any).text || "";
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1].text = fullText;
+          return updated;
+        });
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: 'bot', text: "I'm experiencing a high load. Please try again shortly." }]);
+    } finally { setIsTyping(false); }
+  };
+
+  if (!isVisible) return null;
+
+  return (
+    <div className="fixed bottom-24 right-6 w-[350px] sm:w-[400px] h-[550px] bg-white rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.15)] border border-slate-100 z-[2000] flex flex-col overflow-hidden animate-in no-print">
+      <div className="bg-[#1E3A8A] p-6 text-white flex justify-between items-center">
+        <div>
+          <h4 className="font-black uppercase text-[11px] tracking-widest">AI Site Engineer</h4>
+          <p className="text-[9px] text-blue-200 uppercase font-bold mt-1">Active Jan 2026 Index</p>
+        </div>
+        <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#F9FBFF]">
+        {messages.map((m, i) => (
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[85%] p-4 rounded-[1.5rem] text-xs font-semibold ${m.role === 'user' ? 'bg-[#1E3A8A] text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none shadow-sm border'}`}>{m.text}</div>
+          </div>
+        ))}
+        {isTyping && <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest animate-pulse">AI is thinking...</div>}
+        <div ref={scrollRef} />
+      </div>
+      <div className="p-4 bg-white border-t border-slate-100 flex gap-2">
+        <input value={input} onChange={(e) => setInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSend()} placeholder="Ask about materials..." className="flex-1 bg-slate-50 border-2 border-transparent rounded-[1.2rem] px-5 py-3 text-xs font-bold outline-none focus:border-[#1E3A8A]" />
+        <button onClick={handleSend} className="bg-[#1E3A8A] text-white w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg active-scale transition-transform">➤</button>
+      </div>
+    </div>
+  );
+};
+
+// --- COMMON UI COMPONENTS ---
+const FinancialSummary = ({ total, labor, material }: { total: number, labor: number, material: number }) => (
+  <div className="bg-[#1E3A8A] p-10 sm:p-12 rounded-[3rem] text-white mb-12 flex flex-col md:flex-row justify-between items-center gap-8 shadow-2xl relative z-10">
+    <div className="text-center md:text-left">
+      <p className="text-[10px] font-black uppercase text-blue-200 mb-2 tracking-widest">Grand Project Valuation</p>
+      <h2 className="text-5xl sm:text-6xl font-black">₹{total.toLocaleString()}</h2>
+    </div>
+    <div className="h-px md:h-20 w-full md:w-px bg-white/10"></div>
+    <div className="text-center md:text-right">
+      <p className="text-[10px] font-black uppercase text-blue-200 mb-2 tracking-widest">Total Labour Cost</p>
+      <h3 className="text-3xl sm:text-4xl font-black">₹{labor.toLocaleString()}</h3>
+      <p className="text-[9px] text-blue-300 font-bold uppercase mt-1 tracking-widest">Material Portion: ₹{material.toLocaleString()}</p>
+    </div>
+  </div>
+);
+
+const MaterialBreakdown = ({ materials, materialTotal }: { materials: any[], materialTotal: number }) => (
+  <div className="mb-12 relative z-10">
+    <h4 className="text-[11px] font-black uppercase text-[#1E3A8A] mb-8 tracking-[0.2em] flex items-center gap-3">
+      <span className="w-8 h-px bg-blue-100"></span> 
+      Cost of Materials Breakdown
+      <span className="flex-1 h-px bg-blue-100"></span>
+    </h4>
+    <div className="overflow-x-auto">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="border-b-2 border-slate-100 uppercase text-[9px] text-slate-400 font-black tracking-widest">
+            <th className="py-4 pl-4">Engineering Specification</th>
+            <th className="py-4">Unit Qty</th>
+            <th className="py-4 text-right pr-4">Cost (₹)</th>
+          </tr>
+        </thead>
+        <tbody className="text-xs font-bold text-slate-700">
+          {materials?.map((m, i) => (
+            <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+              <td className="py-6 pl-4">
+                <p className="text-sm font-black text-slate-800 uppercase">{m.name}</p>
+                <p className="text-[9px] text-blue-500 uppercase mt-1 tracking-widest">{m.brandSuggestion || 'Verified Index'}</p>
+              </td>
+              <td className="py-6">{m.quantity}</td>
+              <td className="py-6 text-right pr-4 text-sm font-black text-slate-800">₹{m.totalPrice?.toLocaleString() || '0'}</td>
+            </tr>
+          ))}
+          <tr className="bg-slate-50 font-black">
+            <td className="py-8 pl-6 text-lg font-black uppercase text-[#1E3A8A]">Total Material Component</td>
+            <td></td>
+            <td className="py-8 text-right pr-6 text-xl font-black text-[#1E3A8A]">₹{materialTotal.toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+const ConstructionGuidelines = () => (
+  <div className="bg-blue-50/50 p-10 rounded-[2.5rem] border border-blue-100 mb-12 relative z-10">
+    <h4 className="text-[11px] font-black uppercase text-[#1E3A8A] mb-6 tracking-widest">Guidelines for Construction Management</h4>
+    <ul className="space-y-4">
+      {[
+        { title: "Verify Material Quality", text: "Check the grade of cement (PPC/OPC) and steel (TMT grade) immediately upon site delivery to match specified indices." },
+        { title: "Optimize Curing Process", text: "Ensure newly built walls and concrete slabs are watered consistently for at least 7-10 days to achieve full structural strength." },
+        { title: "Maintain Site Hygiene", text: "Keep the construction zone clear of debris. Regular cleanup prevents accidents and minimizes material wastage." },
+        { title: "Professional Supervision", text: "Always have a qualified engineer verify the steel reinforcement layout before pouring concrete for slabs or columns." },
+        { title: "Proper Material Storage", text: "Store cement bags on a raised wooden platform in a dry, covered area to prevent moisture absorption and hardening." }
+      ].map((tip, i) => (
+        <li key={i} className="flex gap-4">
+          <span className="text-[#1E3A8A] font-black text-xs">0{i+1}.</span>
+          <div>
+            <p className="text-[10px] font-black uppercase text-slate-800 mb-1">{tip.title}</p>
+            <p className="text-[10px] font-semibold text-slate-600 leading-relaxed">{tip.text}</p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
+const TermsAndConditions = () => (
+  <div className="mb-12 relative z-10">
+    <h4 className="text-[11px] font-black uppercase text-slate-400 mb-4 tracking-widest">Terms & Conditions</h4>
+    <div className="grid md:grid-cols-2 gap-x-12 gap-y-3 text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+      <p>• Validity: Based on Jan 2026 market indices. Valid for 7 days.</p>
+      <p>• Milestones: 5% Advance, 45% on Material Delivery, 50% on Completion.</p>
+      <p>• Taxes: All prices are inclusive of GST as per current government norms.</p>
+      <p>• Support: Communication strictly via email or registered callback request.</p>
+      <p>• Execution: Work start subject to site clearance and advance clearance.</p>
+      <p>• Variations: Any additional work will be billed as per current index rates.</p>
+    </div>
+  </div>
+);
+
+const PaymentBlock = ({ total, upiId }: { total: number, upiId: string }) => {
+  const advanceAmount = Math.ceil(total * 0.05);
+  const getQR = (amt: number) => `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=Ajay%20Projects&cu=INR&am=${amt}`)}`;
+  
+  return (
+    <div className="border-t-4 border-slate-900 pt-16 grid grid-cols-1 md:grid-cols-2 gap-12 no-print relative z-10">
+      <div className="flex flex-col items-center p-8 bg-blue-50/30 rounded-[2.5rem] border border-blue-100">
+        <h4 className="text-[10px] font-black uppercase text-[#1E3A8A] mb-6 tracking-widest text-center">Scan to Pay 5% Advance Booking</h4>
+        <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xl mb-4">
+          <img src={getQR(advanceAmount)} className="w-48 h-48" alt="Advance Payment QR" />
+        </div>
+        <p className="text-xl font-black text-[#1E3A8A]">₹{advanceAmount.toLocaleString()}</p>
+        <p className="text-[9px] font-black text-slate-400 mt-2 uppercase">VPA: {upiId}</p>
+      </div>
+      <div className="flex flex-col items-center p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100">
+        <h4 className="text-[10px] font-black uppercase text-slate-800 mb-6 tracking-widest text-center">Scan for 100% Full Payment</h4>
+        <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xl mb-4">
+          <img src={getQR(total)} className="w-48 h-48" alt="Full Payment QR" />
+        </div>
+        <p className="text-xl font-black text-slate-800">₹{total.toLocaleString()}</p>
+        <p className="text-[9px] font-black text-slate-400 mt-2 uppercase">VPA: {upiId}</p>
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN PORTAL ---
 const App: React.FC = () => {
-  const [view, setView] = useState<'estimator' | 'market' | 'invoice' | 'upgrade'>('estimator');
+  const [user, setUser] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [isGuest, setIsGuest] = useState(false);
+  const [guestPhone, setGuestPhone] = useState<string | null>(null);
+  const [view, setView] = useState<'estimator' | 'market' | 'history' | 'payments' | 'invoice' | 'premium'>('estimator');
   const [selectedTask, setSelectedTask] = useState<TaskConfig | null>(null);
   const [formInputs, setFormInputs] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
   const [estimate, setEstimate] = useState<EstimationResult | null>(null);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [marketPrices, setMarketPrices] = useState<MarketPriceList | null>(null);
-  const [userData, setUserData] = useState<UserData | null>(null);
-  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const [tickerText, setTickerText] = useState("Loading current market indices...");
   
-  const [requestCount, setRequestCount] = useState<number>(() => {
-    return parseInt(localStorage.getItem('ajay_request_count') || "0");
+  const [guestCount, setGuestCount] = useState<number>(() => {
+    const saved = localStorage.getItem('ajay_guest_count');
+    return saved ? parseInt(saved, 10) : 0;
   });
-  const [isUpgraded, setIsUpgraded] = useState<boolean>(() => {
-    return localStorage.getItem('ajay_is_upgraded') === 'true';
-  });
-
-  const [cooldownTimeLeft, setCooldownTimeLeft] = useState<number>(0);
-  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const lastUser = localStorage.getItem('ajay_last_user');
-    const userObj = lastUser ? JSON.parse(lastUser) : null;
-    
-    if (userObj) {
-      setUserData(userObj);
-      setFormInputs(prev => ({
-        ...prev,
-        clientName: userObj.name,
-        clientPhone: userObj.phone,
-        area_location: userObj.location
-      }));
-    }
-
-    notifyCloud('access', { user: userObj, userAgent: navigator.userAgent });
-
-    const savedCooldown = localStorage.getItem('ajay_payment_request_ts');
-    if (savedCooldown) {
-      const elapsed = Date.now() - parseInt(savedCooldown);
-      const remaining = (COOLDOWN_MINUTES * 60 * 1000) - elapsed;
-      if (remaining > 0) setCooldownTimeLeft(Math.ceil(remaining / 1000));
-    }
+    supabase.auth.getSession().then(({ data: { session } }) => { 
+      if (session?.user) {
+        setUser(session.user);
+        fetchUserProfile(session.user.id);
+      }
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) { 
+        setUser(session.user); 
+        fetchUserProfile(session.user.id);
+        setIsGuest(false); 
+      } else {
+        setUser(null);
+        setUserProfile(null);
+      }
+    });
+    getRawMaterialPriceList().then(data => {
+      if (data && data.categories) {
+        setMarketPrices(data);
+        const segments = data.categories.flatMap(c => (c.items || []).map(i => `${i.brandName} ${i.category}: ₹${i.priceWithGst?.toLocaleString()}/${i.unit}`));
+        const text = segments.join(' • ');
+        setTickerText(`${text} • ${text}`);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (cooldownTimeLeft > 0) {
-      timerRef.current = window.setInterval(() => {
-        setCooldownTimeLeft(prev => {
-          if (prev <= 1) {
-            if (timerRef.current) clearInterval(timerRef.current);
-            localStorage.removeItem('ajay_payment_request_ts');
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+  const fetchUserProfile = async (userId: string) => {
+    // DATABASE FIX: Strictly query schema: id, full_name, phone, location, is_premium
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+    if (!error && data) {
+      setUserProfile(data);
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [cooldownTimeLeft]);
+  };
 
   useEffect(() => {
-    if (view === 'upgrade' && !isUpgraded) {
-      notifyCloud('upgrade', { user: userData || { name: 'Anonymous', phone: 'Attempting Upgrade' }, details: "User opened premium services page" });
+    if (user && view === 'history') {
+      supabase.from('estimations').select('*').eq('agent_id', user.id).order('created_at', { ascending: false }).limit(20)
+        .then(({ data }) => setHistory(data || []));
     }
-  }, [view, isUpgraded]);
+  }, [user, view]);
 
-  useEffect(() => { getRawMaterialPriceList().then(setMarketPrices); }, []);
+  useEffect(() => {
+    localStorage.setItem('ajay_guest_count', guestCount.toString());
+  }, [guestCount]);
 
-  const triggerSyncFeedback = (msg: string) => {
-    setSyncStatus(msg);
-    setTimeout(() => setSyncStatus(null), 3000);
+  const handleCallback = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!formInputs.clientName || !formInputs.clientPhone) return alert("Enter client details first!");
+    setLoading(true);
+    await notifyCloud('callback_requested', { 
+      clientName: formInputs.clientName, 
+      clientPhone: formInputs.clientPhone, 
+      agent: user?.email || (guestPhone ? `Guest: ${guestPhone}` : 'Guest'),
+      task: selectedTask?.title || 'General'
+    });
+    alert("Callback Requested! We will contact the registered mobile number shortly.");
+    setLoading(false);
   };
-
-  const handleRequestCallBack = async () => {
-    const user = {
-      name: formInputs.clientName || userData?.name || 'Guest',
-      phone: formInputs.clientPhone || userData?.phone || 'N/A',
-      location: formInputs.area_location || userData?.location || 'N/A',
-      email: ''
-    };
-    triggerSyncFeedback("Syncing Callback...");
-    await notifyCloud('callback', { user, task: selectedTask?.title || "General Support", total: estimate?.totalEstimatedCost || 0, details: estimate?.materials || null, inputs: formInputs });
-    alert(`Hello ${user.name}, your request has been sent to Ajay Projects. We will call you on ${user.phone} shortly.`);
-  };
-
-  const handleNotifyWorkOrder = async () => {
-    if (!estimate) return;
-    const user = {
-      name: formInputs.clientName || userData?.name || 'Guest',
-      phone: formInputs.clientPhone || userData?.phone || 'N/A',
-      location: formInputs.area_location || userData?.location || 'N/A',
-      email: ''
-    };
-    triggerSyncFeedback("Sending Work Order...");
-    await notifyCloud('work_order', { user, task: selectedTask?.title, total: estimate.totalEstimatedCost, materials: estimate.materials, inputs: formInputs });
-    alert("Project Start Notified! Ajay Projects has received your work order and invoice details.");
-  };
-
-  const handleViewInvoice = async () => {
-    const user = {
-      name: formInputs.clientName || userData?.name || 'Guest',
-      phone: formInputs.clientPhone || userData?.phone || 'N/A',
-      location: formInputs.area_location || userData?.location || 'N/A',
-      email: ''
-    };
-    setView('invoice');
-    triggerSyncFeedback("Syncing Invoice Data...");
-    await notifyCloud('invoice_sent', { user, task: selectedTask?.title, total: estimate?.totalEstimatedCost, materials: estimate?.materials, inputs: formInputs });
-  };
-
-  const handleInputChange = (name: string, value: any) => { setFormInputs(prev => ({ ...prev, [name]: value })); };
 
   const executeCalculation = async () => {
-    if (requestCount >= FREE_LIMIT && !isUpgraded) { setView('upgrade'); return; }
+    if (isGuest && guestCount >= GUEST_LIMIT) {
+      alert(`Free limit of ${GUEST_LIMIT} estimates reached. Please Sign Up as a Premium Agent to continue.`);
+      return;
+    }
+    
+    // Approval Check: Using is_premium as the primary gate
+    const isPremiumActive = userProfile?.is_premium === true;
+    if (user && !isPremiumActive) {
+      alert("Access Pending. Your account is waiting for admin verification of your payment.");
+      return; 
+    }
+
     if (!selectedTask) return;
-    if (!formInputs.clientName || !formInputs.clientPhone) { alert("Please enter your Name and Mobile Number to generate the quote."); return; }
+    if (!formInputs.clientName || !formInputs.clientPhone) return alert("Client Name and Mobile are mandatory!");
     setLoading(true);
     setEstimate(null);
-    setGeneratedImage(null);
     try {
-      const newUser: UserData = { name: formInputs.clientName, phone: formInputs.clientPhone, location: formInputs.area_location || 'N/A', email: '' };
-      setUserData(newUser);
-      localStorage.setItem('ajay_last_user', JSON.stringify(newUser));
       const result = await getConstructionEstimate(selectedTask.id, formInputs);
       setEstimate(result);
-      const imageUrl = await generateDesignImage(selectedTask.id, result.visualPrompt);
-      setGeneratedImage(imageUrl);
-      triggerSyncFeedback("Syncing Quote...");
-      notifyCloud('quote', { user: newUser, task: selectedTask.title, inputs: formInputs, total: result.totalEstimatedCost });
-      if (!isUpgraded) {
-        const nextCount = requestCount + 1;
-        setRequestCount(nextCount);
-        localStorage.setItem('ajay_request_count', nextCount.toString());
-      }
-    } catch (err: any) { alert("Analysis failed. Please try again."); } finally { setLoading(false); }
+      if (isGuest) setGuestCount(prev => prev + 1);
+      
+      await notifyCloud('quote_requested', { 
+        task: selectedTask.title, 
+        inputs: formInputs, 
+        result, 
+        agent: user?.email || (guestPhone ? `Guest: ${guestPhone}` : 'Guest'), 
+        agentId: user?.id 
+      });
+    } catch (err: any) { 
+      alert(err.message || "Engineering service at capacity. Please try again."); 
+    } finally { setLoading(false); }
   };
 
-  const handleNavToEstimator = () => { setView('estimator'); setEstimate(null); setGeneratedImage(null); setSelectedTask(null); };
-
-  const handlePaymentConfirmationClick = () => {
-    if (cooldownTimeLeft > 0) return;
-    const ts = Date.now();
-    localStorage.setItem('ajay_payment_request_ts', ts.toString());
-    setCooldownTimeLeft(COOLDOWN_MINUTES * 60);
-    notifyCloud('upgrade', { user: userData || { name: 'Awaiting Confirmation', phone: 'N/A' }, details: `User clicked 'Awaiting Payment Confirmation' for ₹${UPGRADE_PRICE}.` });
-    alert(`Payment request submitted. Confirmation may take up to 5 minutes. Please wait.`);
+  const handleGuestModeInit = (phone: string) => {
+    setGuestPhone(phone);
+    setIsGuest(true);
+    notifyCloud('access' as any, { clientPhone: phone, clientName: 'New Guest Access', agent: 'Guest Portal' });
   };
 
-  const getUpiQrUrl = (amount?: number) => {
-    const note = amount ? `Payment_₹${amount}` : 'Consultation';
-    let url = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(BRAND_NAME)}&cu=INR&tn=${encodeURIComponent(note)}`;
-    if (amount) url += `&am=${amount}`;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
+  const isFieldVisible = (f: any) => {
+    if (!f.dependsOn) return true;
+    const depValue = formInputs[f.dependsOn];
+    if (Array.isArray(f.showIfValue)) return f.showIfValue.includes(depValue);
+    return depValue === f.showIfValue;
   };
 
-  const formatTime = (seconds: number) => { const m = Math.floor(seconds / 60); const s = seconds % 60; return `${m}:${s.toString().padStart(2, '0')}`; };
+  const materialTotal = estimate?.materials?.reduce((sum, m) => sum + (m.totalPrice || 0), 0) || 0;
 
-  const PaymentSection = ({ total }: { total: number }) => (
-    <div className="mt-8 flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="bg-slate-50 p-6 rounded-[2.5rem] border flex flex-col items-center">
-          <p className="text-[9px] font-black uppercase text-[#1E3A8A] tracking-widest mb-4 text-center">Full Work Order Payment</p>
-          <div className="bg-white p-2 rounded-2xl shadow-sm mb-4">
-            <img src={getUpiQrUrl(total)} className="w-32 h-32" alt="Full Payment" />
-          </div>
-          <p className="text-xl font-black">₹{total.toLocaleString('en-IN')}</p>
-        </div>
-        <div className="bg-blue-50/50 p-6 rounded-[2.5rem] border-2 border-blue-100 flex flex-col items-center">
-          <p className="text-[9px] font-black uppercase text-blue-800 tracking-widest mb-4 text-center">5% Advance Booking Token</p>
-          <div className="bg-white p-2 rounded-2xl shadow-sm mb-4">
-            <img src={getUpiQrUrl(Math.round(total * 0.05))} className="w-32 h-32" alt="Advance Payment" />
-          </div>
-          <p className="text-xl font-black text-blue-900">₹{Math.round(total * 0.05).toLocaleString('en-IN')}</p>
-        </div>
-      </div>
-      <div className="bg-amber-50 p-5 rounded-[1.5rem] border border-amber-100 text-center">
-        <p className="text-[9px] font-black text-amber-800 uppercase tracking-widest mb-1">🛡️ Refund Guarantee</p>
-        <p className="text-[10px] font-medium text-amber-700 leading-relaxed italic">Payments are **100% refundable** if the work order is cancelled before site mobilization.</p>
-      </div>
-    </div>
-  );
+  // Global access check aligned with simplified is_premium logic
+  const isApproved = userProfile?.is_premium === true;
+  const isPending = user && userProfile && userProfile.is_premium === false;
+
+  if (!user && !isGuest) return <AuthScreen onSignupSuccess={() => setView('estimator')} onGuestMode={handleGuestModeInit} />;
 
   return (
-    <div className="min-h-screen bg-[#F9FBFF] font-sans text-slate-900 pb-20 relative">
+    <div className="min-h-screen bg-[#F9FBFF] font-sans pb-28 flex flex-col md:flex-row relative">
       <ChatBot isVisible={isChatOpen} onClose={() => setIsChatOpen(false)} />
       
-      <button 
-        onClick={() => setIsChatOpen(true)}
-        className="fixed bottom-6 right-6 w-16 h-16 bg-[#1E3A8A] text-white rounded-full shadow-2xl flex items-center justify-center text-3xl z-[999] hover:scale-110 active:scale-90 transition-transform shadow-blue-900/40"
-      >
-        💬
-      </button>
+      <aside className="w-full md:w-20 lg:w-24 bg-[#1E3A8A] md:min-h-screen flex md:flex-col items-center justify-between py-6 px-4 no-print shrink-0 md:sticky md:top-0 z-[1100]">
+        <div className="flex flex-col items-center gap-8">
+          <div className="bg-white/10 p-3 rounded-2xl">
+             <div className="text-2xl text-white">🏗️</div>
+          </div>
+          <button 
+            onClick={() => {if(!user) {setIsGuest(false); setView('estimator'); setSelectedTask(null); setEstimate(null);}}}
+            className="group relative flex flex-col items-center gap-2"
+          >
+            <div className={`p-4 rounded-2xl transition-all ${!user ? 'bg-blue-500 shadow-lg scale-110' : 'bg-white/5 hover:bg-white/10'}`}>
+              <div className="text-xl text-white">🔑</div>
+            </div>
+            <span className="text-[8px] font-black text-white/50 uppercase tracking-widest text-center group-hover:text-white transition-colors">Premium</span>
+          </button>
+        </div>
+      </aside>
 
-      {syncStatus && (
-        <div className="fixed top-12 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top-4 duration-300">
-          <div className="bg-[#1E3A8A] text-white px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-2xl flex items-center gap-3">
-            <span className="animate-pulse">●</span> {syncStatus}
+      <div className="flex-1 min-w-0">
+        <div className="bg-[#1E3A8A] text-white py-2 overflow-hidden whitespace-nowrap no-print border-b border-white/10">
+          <div className="inline-block animate-marquee uppercase text-[10px] font-black tracking-widest px-4">
+            {tickerText}
           </div>
         </div>
-      )}
 
-      <header className="bg-white border-b py-6 px-8 sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4 cursor-pointer" onClick={handleNavToEstimator}>
-            <div className="bg-[#1E3A8A] w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-lg text-white">🏗️</div>
-            <div>
-              <h1 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
-                {isUpgraded ? "PRO UNLIMITED ACCESS" : `${Math.max(0, FREE_LIMIT - requestCount)} FREE QUOTES LEFT`}
-              </p>
+        <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 py-6 px-10 sticky top-0 z-[1000] shadow-sm no-print">
+          <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-4">
+            <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}}>
+              <div>
+                <h1 className="text-xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
+                <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em] mt-1">
+                  {user ? `Welcome ${userProfile?.full_name || user.email}` : `Guest Mode (${GUEST_LIMIT - guestCount} Left)`}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'estimator' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Estimator</button>
+              <button onClick={() => setView('market')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'market' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Market</button>
+              {user && <button onClick={() => setView('history')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'history' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>History</button>}
+              <button onClick={() => user ? supabase.auth.signOut() : setIsGuest(false)} className="px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase bg-red-50 text-red-500">Exit</button>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={handleNavToEstimator} className={`px-4 py-3 rounded-xl font-black uppercase text-[9px] tracking-widest ${view === 'estimator' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Estimator</button>
-            <button onClick={() => setView('market')} className={`px-4 py-3 rounded-xl font-black uppercase text-[9px] tracking-widest ${view === 'market' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Market</button>
-            <button onClick={() => setView('upgrade')} className={`px-4 py-3 rounded-xl font-black uppercase text-[9px] tracking-widest ${view === 'upgrade' || isUpgraded ? 'bg-amber-400 text-slate-900' : 'bg-slate-50 text-slate-400'}`}>{isUpgraded ? 'Premium Active' : 'Upgrade Pro'}</button>
-          </div>
-        </div>
-      </header>
+        </header>
 
-      <main className="max-w-7xl mx-auto px-6 pt-12">
-        {view === 'market' ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-4xl font-black uppercase tracking-tighter mb-10 text-slate-900">Hyderabad Price Index</h2>
-            {marketPrices && marketPrices.categories ? (
-              <div className="grid md:grid-cols-3 gap-8">
-                {marketPrices.categories.map((cat, i) => (
-                  <div key={i} className="bg-white p-10 rounded-[3rem] border shadow-sm">
-                    <h3 className="text-xl font-black uppercase text-slate-800 mb-6">{cat.title}</h3>
-                    <div className="space-y-4">
-                      {cat.items?.map((item, j) => (
-                        <div key={j} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl">
-                          <div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">{item.brandName}</p>
-                            <p className="text-sm font-bold text-slate-800">{item.specificType}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-lg font-black text-[#1E3A8A]">₹{item.priceWithGst.toLocaleString('en-IN')}</p>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Per {item.unit}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+        <main className="max-w-7xl mx-auto px-6 sm:px-10 pt-16">
+          {user && isPending && (
+             <div className="animate-in max-w-2xl mx-auto py-20 text-center">
+                <div className="bg-orange-50 w-24 h-24 rounded-[3rem] flex items-center justify-center text-5xl mx-auto mb-10 border border-orange-100 shadow-sm">⏳</div>
+                <h2 className="text-3xl font-black uppercase tracking-tighter text-slate-800 mb-4">Subscription Pending Approval</h2>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] leading-relaxed">
+                  Thank you for subscribing! Ajay is currently verifying your ₹499 payment. 
+                  Access to the Premium Index is usually granted within 2 hours.
+                </p>
+                <div className="mt-12 pt-10 border-t border-slate-100">
+                  <p className="text-[9px] font-black text-slate-400 uppercase">Need help? Contact Admin</p>
+                  <p className="text-sm font-black text-[#1E3A8A] lowercase mt-1">{SUPPORT_EMAIL}</p>
+                </div>
+             </div>
+          )}
+
+          {(!user || isApproved) && view === 'estimator' && !estimate && !selectedTask && (
+            <div className="animate-in">
+              <div className="mb-12 text-center">
+                <h2 className="text-4xl font-black uppercase tracking-tighter text-slate-900">Engineering Services Portal</h2>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Hyderabad 2026 Material Index Projections</p>
+              </div>
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {CONSTRUCTION_TASKS.map(t => (
+                  <div key={t.id} onClick={() => setSelectedTask(t)} className="p-10 bg-white rounded-[3.5rem] border hover:border-[#1E3A8A] transition-all cursor-pointer shadow-sm group relative overflow-hidden">
+                    <div className="text-5xl mb-6 bg-slate-50 w-20 h-20 rounded-[2rem] flex items-center justify-center group-hover:bg-blue-50 transition-colors">{t.icon}</div>
+                    <h3 className="text-xl font-black uppercase tracking-tight mb-2 group-hover:text-[#1E3A8A] transition-colors">{t.title}</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed opacity-60">{t.description}</p>
                   </div>
                 ))}
               </div>
-            ) : <div className="p-20 text-center font-black text-slate-300 animate-pulse uppercase tracking-[0.3em]">Syncing Hub Ledger...</div>}
-          </div>
-        ) : view === 'upgrade' ? (
-          <div className="max-w-4xl mx-auto animate-in zoom-in-95 duration-500">
-            <div className="bg-white w-full rounded-[4rem] p-12 md:p-20 text-center relative overflow-hidden shadow-2xl border">
-               <div className="grid md:grid-cols-2 gap-16 items-stretch text-left">
-                  <div className="space-y-8">
-                     <div className="inline-block bg-amber-400 text-slate-900 px-8 py-3 rounded-full text-[12px] font-black uppercase tracking-[0.2em] shadow-lg transform -rotate-2">Premium Terminal</div>
-                     <h2 className="text-6xl font-black uppercase tracking-tighter text-slate-900 leading-none">Unlimited Pro</h2>
-                     <p className="text-lg font-bold text-slate-400 leading-relaxed">Unlock full 2026 Price Index access and priority architectural renders for a one-time activation of ₹{UPGRADE_PRICE}.</p>
-                     <div className="bg-slate-50 p-8 rounded-[2.5rem] border shadow-inner">
-                       <p className="text-[10px] font-black uppercase text-slate-400 mb-4 tracking-widest">Scan to Activate</p>
-                       <div className="flex items-center gap-6">
-                         <img src={getUpiQrUrl(UPGRADE_PRICE)} className="w-28 h-28 rounded-2xl border-4 border-white shadow-lg" alt="UPI" />
-                         <div>
-                           <p className="text-xs font-black text-[#1E3A8A] uppercase">{UPI_ID}</p>
-                           <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Instant Pro Activation</p>
-                         </div>
-                       </div>
-                     </div>
-                  </div>
-                  <div className="bg-[#1E3A8A] p-12 rounded-[3.5rem] text-white flex flex-col items-center justify-center text-center shadow-2xl relative">
-                     <div className="text-7xl mb-6">💎</div>
-                     <h3 className="text-6xl font-black tracking-tighter">₹{UPGRADE_PRICE}</h3>
-                     <p className="text-[10px] font-black uppercase opacity-60 mt-6 tracking-widest">One-Time Activation</p>
-                     {isUpgraded ? (
-                       <div className="mt-12 bg-white/10 p-6 rounded-3xl border border-white/20 w-full"><p className="font-black uppercase text-xs tracking-widest">Premium Service Active</p></div>
-                     ) : (
-                       <button disabled={cooldownTimeLeft > 0} onClick={handlePaymentConfirmationClick} className={`mt-12 w-full py-6 rounded-[2rem] font-black uppercase text-xs shadow-2xl transition-transform active:scale-95 ${cooldownTimeLeft > 0 ? 'bg-slate-500 text-slate-200 cursor-not-allowed' : 'bg-white text-[#1E3A8A] hover:scale-105'}`}>
-                         {cooldownTimeLeft > 0 ? `Awaiting Confirmation (${formatTime(cooldownTimeLeft)})` : 'Awaiting Payment Confirmation 🚀'}
-                       </button>
-                     )}
-                     <p className="mt-4 text-[9px] opacity-60 font-bold uppercase tracking-widest italic">Access enabled immediately upon admin approval.</p>
-                  </div>
-               </div>
             </div>
-          </div>
-        ) : view === 'invoice' && estimate ? (
-          <div className="bg-white p-12 md:p-20 rounded-[4rem] shadow-2xl max-w-4xl mx-auto animate-in zoom-in-95 duration-500 border relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-10 opacity-5 font-black text-9xl pointer-events-none select-none">AJAY</div>
-             <div className="flex justify-between items-start border-b-8 border-slate-900 pb-10 mb-10">
-                <h2 className="text-6xl font-black uppercase tracking-tighter">Quote</h2>
-                <div className="text-right">
-                   <p className="font-black text-xl text-slate-800 uppercase tracking-tighter">{BRAND_NAME}</p>
-                   <p className="text-xs font-bold text-slate-400">{new Date().toLocaleDateString('en-IN')}</p>
-                </div>
-             </div>
-             <div className="grid grid-cols-2 gap-10 mb-12">
-                <div>
-                   <h4 className="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest">Billed To</h4>
-                   <p className="text-xl font-black text-slate-900 uppercase">{userData?.name || "Client"}</p>
-                   <p className="font-bold text-[#1E3A8A] text-sm">{userData?.phone || "N/A"}</p>
-                   <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{userData?.location}, Hyderabad</p>
-                </div>
-                <div className="text-right">
-                   <h4 className="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest">Project Detail</h4>
-                   <p className="text-xl font-black text-slate-900 uppercase">{selectedTask?.title}</p>
-                   <p className="font-bold text-emerald-600 text-sm">Timeline: {estimate.estimatedDays} Days</p>
-                </div>
-             </div>
-             <div className="overflow-x-auto rounded-[2rem] border mt-6 bg-white">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900 text-white uppercase font-black text-[9px] tracking-widest">
-                    <tr><th className="p-4">Material / Item</th><th className="p-4">Qty</th><th className="p-4 text-right">Estimate (₹)</th></tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {estimate.materials?.map((m, i) => (
-                      <tr key={i}>
-                        <td className="p-4 font-black">{m.name}<div className="text-[8px] text-[#1E3A8A] mt-1 uppercase tracking-widest">{m.brandSuggestion}</div></td>
-                        <td className="p-4 font-bold">{m.quantity}</td>
-                        <td className="p-4 text-right font-black">₹{m.totalPrice.toLocaleString('en-IN')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-             </div>
-             <PaymentSection total={estimate.totalEstimatedCost} />
-             <div className="mt-12 flex gap-4 w-full justify-center">
-                <button onClick={handleRequestCallBack} className="bg-slate-900 text-white px-10 py-5 rounded-2xl font-black uppercase text-xs shadow-xl transition-transform active:scale-95">📞 Request Callback</button>
-                <button onClick={handleNotifyWorkOrder} className="bg-emerald-600 text-white px-10 py-5 rounded-2xl font-black uppercase text-xs shadow-xl transition-transform active:scale-95">🏗️ Start Project</button>
-             </div>
-          </div>
-        ) : (
-          <div className="grid lg:grid-cols-12 gap-12">
-            {!selectedTask ? (
-              <div className="lg:col-span-12 space-y-12">
-                <div className="bg-white p-10 rounded-[3rem] border-l-[12px] border-[#1E3A8A] shadow-xl animate-in slide-in-from-left duration-700 bg-gradient-to-r from-white to-blue-50/20">
-                  <p className="text-[#1E3A8A] font-black uppercase tracking-[0.2em] text-[10px] mb-2">{userData?.name ? 'Verified Session' : 'Smart Engineering Portal'}</p>
-                  <h2 className="text-5xl font-black tracking-tighter leading-none">{userData?.name ? `Welcome back to Ajay Projects, ${userData.name}!` : `Ajay Projects Engineering`}</h2>
-                  <p className="text-slate-500 text-sm font-medium mt-3">{userData?.name ? `Ready to analyze your next project in ${userData.location}?` : 'Calculate construction quotes with real-time 2026 price accuracy.'}</p>
-                </div>
+          )}
 
-                {/* BRAND REINFORCEMENT SECTION FOR SEO */}
-                {!userData?.name && (
-                  <div className="bg-white p-10 rounded-[3rem] shadow-sm border animate-in fade-in duration-1000">
-                    <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-4">About Ajay Projects</h2>
-                    <p className="text-slate-600 text-sm font-medium leading-relaxed max-w-4xl italic">
-                      At <strong className="text-[#1E3A8A]">Ajay Projects</strong>, we represent the gold standard in Hyderabad's construction engineering and real estate consultancy. 
-                      Our portal is specifically designed for agents to access the <strong className="text-[#1E3A8A]">Ajay Projects</strong> proprietary 2026 construction market index. 
-                      When you choose <strong className="text-[#1E3A8A]">Ajay Projects</strong>, you are partnering with a leader in Hyderabad's Troop Bazar pricing logistics, 
-                      ensuring every house and flat build is optimized for maximum efficiency and transparency. Experience the future of infrastructure at <strong className="text-[#1E3A8A]">ajayprojects.com</strong>.
-                    </p>
+          {(!user || isApproved) && selectedTask && !estimate && (
+            <div className="max-w-4xl mx-auto bg-white p-10 sm:p-14 rounded-[4rem] border shadow-2xl animate-in">
+              <button onClick={() => setSelectedTask(null)} className="mb-10 text-[9px] font-black uppercase text-[#1E3A8A] bg-blue-50 px-6 py-3 rounded-full hover:bg-blue-100 transition-colors">← Back</button>
+              <h2 className="text-2xl font-black uppercase mb-12 tracking-tight text-[#1E3A8A]">{selectedTask.title} Configuration</h2>
+              <div className="grid md:grid-cols-2 gap-8">
+                {selectedTask.fields.filter(isFieldVisible).map(f => (
+                  <div key={f.name} className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">{f.label}</label>
+                    {f.type === 'select' ? (
+                      <select 
+                        className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.2rem] px-6 py-4 text-xs font-bold outline-none"
+                        value={formInputs[f.name] || ''}
+                        onChange={(e) => setFormInputs({...formInputs, [f.name]: e.target.value})}
+                      >
+                        <option value="">{f.placeholder}</option>
+                        {f.options?.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    ) : (
+                      <input 
+                        className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.2rem] px-6 py-4 text-xs font-bold outline-none" 
+                        placeholder={f.placeholder} 
+                        type={f.type} 
+                        value={formInputs[f.name] || ''}
+                        onChange={(e) => setFormInputs({...formInputs, [f.name]: e.target.value})} 
+                      />
+                    )}
                   </div>
-                )}
-
-                <div className="grid md:grid-cols-3 gap-8 animate-in slide-in-from-bottom-8 duration-500">
-                  {CONSTRUCTION_TASKS.map(task => (
-                    <button key={task.id} onClick={() => { setSelectedTask(task); setEstimate(null); }} className="bg-white p-12 rounded-[4rem] border shadow-sm hover:shadow-2xl transition-all text-left group">
-                      <div className="text-7xl mb-8 group-hover:scale-110 transition-transform duration-300">{task.icon}</div>
-                      <h3 className="text-3xl font-black uppercase tracking-tighter leading-none mb-4">{task.title}</h3>
-                      <p className="text-sm text-slate-400 font-medium leading-relaxed mb-6">{task.description}</p>
-                      <span className="text-[10px] font-black uppercase text-[#1E3A8A] tracking-widest">Get Quote →</span>
-                    </button>
-                  ))}
-                </div>
-                {!isUpgraded && (
-                  <div className="bg-[#1E3A8A] p-16 rounded-[5rem] text-white flex flex-col md:flex-row items-center justify-between gap-12 shadow-2xl relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-400/20 to-transparent pointer-events-none"></div>
-                    <div className="relative z-10 text-center md:text-left">
-                       <h2 className="text-5xl font-black uppercase tracking-tighter leading-none mb-4">Professional Upgrade</h2>
-                       <p className="text-xl opacity-80 font-medium mb-8">Unlimited 2026 Price Index Analysis for ₹{UPGRADE_PRICE}</p>
-                       <button onClick={() => setView('upgrade')} className="bg-white text-[#1E3A8A] px-12 py-6 rounded-3xl font-black uppercase text-xs shadow-2xl hover:bg-slate-50 transition-all">Unlock Premium 🚀</button>
-                    </div>
-                    <div className="relative z-10 w-56 h-56 bg-white/10 rounded-[4rem] backdrop-blur-xl flex items-center justify-center text-9xl">💎</div>
-                  </div>
-                )}
+                ))}
               </div>
-            ) : (
-              <>
-                <div className="lg:col-span-4 bg-white p-10 rounded-[4rem] shadow-xl border sticky top-32 h-fit">
-                   <button onClick={handleNavToEstimator} className="text-[10px] font-black text-[#1E3A8A] mb-8 uppercase hover:underline tracking-widest">← Back to Services</button>
-                   <form onSubmit={(e) => { e.preventDefault(); executeCalculation(); }} className="space-y-6">
-                      {selectedTask.fields?.map(field => {
-                        const currentValue = formInputs[field.dependsOn || ''];
-                        const isVisible = !field.dependsOn || (Array.isArray(field.showIfValue) ? field.showIfValue.includes(currentValue) : currentValue === field.showIfValue);
-                        if (!isVisible) return null;
-                        return (
-                          <div key={field.name} className="animate-in fade-in slide-in-from-top-2 duration-300">
-                             <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block tracking-widest">{field.label}</label>
-                             {field.type === 'select' ? (
-                                <select required value={formInputs[field.name] || ''} className="w-full bg-slate-50 p-5 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold text-sm cursor-pointer" onChange={(e) => handleInputChange(field.name, e.target.value)}>
-                                   <option value="">{field.placeholder}</option>
-                                   {field.options?.map(o => <option key={o} value={o}>{o}</option>)}
-                                </select>
-                             ) : (
-                                <input required value={formInputs[field.name] || ''} type={field.type} placeholder={field.placeholder} className="w-full bg-slate-50 p-5 rounded-2xl border-2 border-slate-50 focus:border-[#1E3A8A] outline-none font-bold text-sm" onChange={(e) => handleInputChange(field.name, e.target.value)} />
-                             )}
-                          </div>
-                        );
-                      })}
-                      <button disabled={loading} type="submit" className="w-full bg-[#1E3A8A] text-white py-6 rounded-3xl font-black uppercase text-xs shadow-2xl transition-all active:scale-95 disabled:bg-slate-400">{loading ? "Engineering Sync..." : "Generate Quote"}</button>
-                   </form>
-                   {estimate && <div className="mt-8 pt-8 border-t flex flex-col gap-4"><button onClick={handleRequestCallBack} className="w-full bg-slate-50 text-slate-900 border px-6 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest">📞 Request Support</button></div>}
+              <button onClick={executeCalculation} disabled={loading} className="w-full mt-14 py-6 rounded-[1.8rem] bg-[#1E3A8A] text-white font-black uppercase tracking-widest shadow-2xl hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50">
+                {loading ? 'Consulting 2026 Indices...' : 'Generate Validated Proposal'}
+              </button>
+            </div>
+          )}
+
+          {estimate && (
+            <div className="animate-in max-w-5xl mx-auto space-y-8 pb-20 relative z-10">
+              <div className="flex justify-end gap-4 no-print flex-wrap relative z-[200]">
+                <button onClick={() => window.print()} className="bg-[#1E3A8A] text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-blue-800 cursor-pointer">Print Proposal</button>
+                <button onClick={() => {setEstimate(null); setView('estimator');}} className="bg-slate-50 text-slate-800 px-6 py-3 rounded-xl font-black uppercase text-[10px] border border-slate-200 cursor-pointer">New Estimate</button>
+              </div>
+              <div className="bg-white p-10 sm:p-20 rounded-[4rem] border shadow-2xl relative overflow-hidden" id="printable-invoice">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-bl-[10rem] -mr-32 -mt-32 no-print"></div>
+                <div className="flex justify-between items-start mb-16 relative z-10">
+                  <div>
+                    <div className="bg-[#1E3A8A] w-16 h-16 rounded-2xl flex items-center justify-center text-3xl text-white mb-6">🏗️</div>
+                    <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-1">{BRAND_NAME}</h1>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Hyderabad Engineering Index</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ref ID</p>
+                    <p className="text-sm font-black text-slate-800 uppercase mb-4">#AJ-{Math.random().toString(36).substr(2, 6).toUpperCase()}</p>
+                    <p className="text-sm font-bold text-slate-500 uppercase">{new Date().toLocaleDateString('en-IN')}</p>
+                  </div>
                 </div>
-                <div className="lg:col-span-8 space-y-10">
-                   {estimate ? (
-                     <div className="animate-in fade-in duration-500">
-                        <div className="bg-white p-10 rounded-[3.5rem] shadow-xl border flex flex-col md:flex-row justify-between items-center mb-8 gap-6">
-                           <div>
-                              <h2 className="text-3xl font-black uppercase tracking-tighter leading-none">{selectedTask.title} Result</h2>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{userData?.name || "Client"} • {userData?.location || "Hyderabad"}</p>
-                           </div>
-                           <button onClick={handleViewInvoice} className="bg-slate-900 text-white px-8 py-5 rounded-2xl font-black text-[10px] uppercase shadow-xl hover:scale-105 transition-all">Official Invoice 📄</button>
-                        </div>
-                        <div className="grid md:grid-cols-3 gap-6 mb-8">
-                           <div className="bg-[#1E3A8A] text-white p-8 rounded-[3rem] shadow-lg border-b-[8px] border-blue-900">
-                              <p className="text-[10px] opacity-60 font-black mb-1 uppercase tracking-widest">Grand Total</p>
-                              <h4 className="text-4xl font-black">₹{estimate.totalEstimatedCost.toLocaleString('en-IN')}</h4>
-                           </div>
-                           <div className="bg-white p-8 rounded-[3rem] border shadow-sm flex flex-col justify-center text-center group cursor-pointer" onClick={handleRequestCallBack}>
-                              <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">📞</div>
-                              <p className="font-black uppercase text-[10px] text-[#1E3A8A] tracking-widest">Callback Request</p>
-                           </div>
-                           <div className="bg-white p-8 rounded-[3rem] border shadow-sm flex flex-col justify-center text-center group cursor-pointer" onClick={handleNotifyWorkOrder}>
-                              <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">🏗️</div>
-                              <p className="font-black uppercase text-[10px] text-emerald-600 tracking-widest">Place Work Order</p>
-                           </div>
-                        </div>
-                        <div className="bg-white p-10 rounded-[3.5rem] shadow-xl border mb-10 overflow-hidden">
-                           <h3 className="text-xl font-black uppercase text-slate-800 tracking-tight mb-8">Engineering Ledger</h3>
-                           <div className="overflow-x-auto rounded-[2.5rem] border bg-slate-50/50 mb-8">
-                              <table className="w-full text-left text-xs">
-                                <thead className="bg-slate-900 text-white font-black text-[9px] uppercase tracking-widest">
-                                  <tr><th className="p-5">Material Detail</th><th className="p-5">Quantity</th><th className="p-5 text-right">Cost (₹)</th></tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {estimate.materials?.map((m, i) => (
-                                    <tr key={i} className="bg-white/50">
-                                      <td className="p-5 font-black">{m.name}<div className="text-[8px] text-[#1E3A8A] mt-1 uppercase tracking-widest">{m.brandSuggestion}</div></td>
-                                      <td className="p-5 font-bold">{m.quantity}</td>
-                                      <td className="p-5 text-right font-black">₹{m.totalPrice.toLocaleString('en-IN')}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                           </div>
-                           <PaymentSection total={estimate.totalEstimatedCost} />
-                        </div>
-                        {generatedImage && (
-                          <div className="group relative rounded-[5rem] overflow-hidden shadow-2xl border-8 border-white animate-in zoom-in-95 duration-700 bg-slate-200">
-                            <img src={generatedImage} className="w-full h-[600px] object-cover transition-transform duration-1000 group-hover:scale-105" alt="Architectural Render" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-16">
-                               <p className="text-white font-black text-5xl uppercase tracking-tighter mb-4">Vision Render</p>
-                               <p className="text-white/60 font-bold text-xs uppercase tracking-widest max-w-lg">Indicative design concept based on project metrics.</p>
-                            </div>
-                          </div>
-                        )}
-                     </div>
-                   ) : (
-                     <div className="h-[600px] flex flex-col items-center justify-center text-center p-20 border-8 border-dashed border-slate-100 rounded-[6rem] opacity-30 select-none">
-                        <div className="text-[12rem] mb-8">{loading ? "⏳" : "📊"}</div>
-                        <h3 className="text-4xl font-black text-slate-400 uppercase tracking-tighter">Analysis Terminal</h3>
-                        <p className="text-sm font-bold text-slate-300 mt-4 uppercase tracking-[0.3em]">{loading ? "Generating Quote & Vision Render..." : "Input parameters to sync with Hub Index"}</p>
-                     </div>
-                   )}
+                <div className="mb-12 relative z-10 border-b border-slate-50 pb-8">
+                  <h4 className="text-[10px] font-black uppercase text-slate-400 mb-4 tracking-widest">Client Context</h4>
+                  <p className="text-2xl font-black text-slate-800 mb-1">{formInputs.clientName}</p>
+                  <p className="text-sm font-bold text-slate-500 uppercase">{formInputs.area_location || 'Local Zone'}, Hyderabad</p>
                 </div>
-              </>
-            )}
-          </div>
-        )}
-      </main>
+                <FinancialSummary total={estimate.totalEstimatedCost} labor={estimate.laborCost} material={materialTotal} />
+                <MaterialBreakdown materials={estimate.materials} materialTotal={materialTotal} />
+                <ConstructionGuidelines />
+                <TermsAndConditions />
+                <PaymentBlock total={estimate.totalEstimatedCost} upiId={UPI_ID} />
+              </div>
+            </div>
+          )}
+
+          {view === 'market' && marketPrices?.categories && (
+            <div className="grid md:grid-cols-2 gap-10 animate-in pb-20">
+              {marketPrices.categories.map((cat, i) => (
+                <div key={i} className="bg-white p-12 rounded-[3.5rem] border shadow-sm">
+                  <h3 className="text-xl font-black uppercase text-[#1E3A8A] mb-10 border-b-2 border-slate-50 pb-6">{cat.title}</h3>
+                  <div className="space-y-8">
+                    {cat.items?.map((item, j) => (
+                      <div key={j} className="flex justify-between items-center group">
+                        <div><p className="text-sm font-black text-slate-800 group-hover:text-[#1E3A8A] transition-colors">{item.brandName}</p><p className="text-[9px] text-slate-400 uppercase font-black tracking-widest mt-1">{item.specificType} {item.category}</p></div>
+                        <div className="text-right"><p className="text-lg font-black text-[#1E3A8A]">₹{item.priceWithGst?.toLocaleString() || '0'}</p><p className="text-[9px] font-bold text-slate-400 uppercase">per {item.unit}</p></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {view === 'history' && (
+             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 animate-in pb-20">
+               {history.length > 0 ? history.map((h, i) => (
+                 <div key={i} className="bg-white p-10 rounded-[3rem] border shadow-sm cursor-pointer hover:shadow-xl transition-all group" onClick={() => {setEstimate(h.result); setView('estimator');}}>
+                   <span className="text-[9px] font-black uppercase bg-slate-100 px-4 py-1.5 rounded-full text-slate-500">{new Date(h.created_at).toLocaleDateString()}</span>
+                   <h4 className="text-xl font-black uppercase text-slate-800 mt-6 mb-2 group-hover:text-[#1E3A8A]">{h.client_name}</h4>
+                   <div className="pt-6 border-t mt-6 flex justify-between items-center">
+                      <p className="text-lg font-black text-[#1E3A8A]">₹{h.result?.totalEstimatedCost?.toLocaleString() || 'N/A'}</p>
+                   </div>
+                 </div>
+               )) : <div className="col-span-full py-32 text-center opacity-30 text-4xl font-black uppercase tracking-widest">📁 NO RECORDS</div>}
+             </div>
+          )}
+        </main>
+      </div>
+
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
+        }
+        .animate-marquee {
+          display: inline-block;
+          animation: marquee 120s linear infinite;
+          padding-left: 20px;
+          min-width: 100%;
+        }
+        @media print {
+          .no-print { display: none !important; }
+          #printable-invoice { border: none !important; box-shadow: none !important; border-radius: 0 !important; padding: 0 !important; }
+          aside { display: none !important; }
+        }
+      `}</style>
     </div>
   );
 };

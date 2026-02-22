@@ -21,10 +21,10 @@ CACHE_DIR = Path("image_cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
 # API Setup
-if "API_KEY" in os.environ:
-    genai.configure(api_key=os.environ["API_KEY"])
+if "GEMINI_API_KEY" in os.environ:
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 else:
-    st.error("API_KEY environment variable not found.")
+    st.error("GEMINI_API_KEY environment variable not found.")
 
 # --- CUSTOM STYLING ---
 st.markdown("""
