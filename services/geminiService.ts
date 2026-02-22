@@ -2,7 +2,18 @@
 import { GoogleGenAI, Type, Chat, GenerateContentResponse } from "@google/genai";
 import { EstimationResult, ConstructionCategory, MarketPriceList } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let aiInstance: GoogleGenAI | null = null;
+
+const getAI = () => {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY || "";
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not set. Please configure it in your environment variables.");
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+};
 
 /** 
  * AJAY PROJECTS - ENGINE CONFIGURATION
@@ -43,6 +54,7 @@ async function fetchWithRetry(fn: () => Promise<any>, retries = 3, interval = 20
 }
 
 export const startAssistantChat = () => {
+  const ai = getAI();
   return ai.chats.create({
     model: PRIMARY_MODEL,
     config: {
@@ -62,6 +74,7 @@ export const getConstructionEstimate = async (
   category: ConstructionCategory,
   inputs: Record<string, any>
 ): Promise<EstimationResult> => {
+  const ai = getAI();
   const cacheKey = `est_${category}_${inputs.totalArea || inputs.area || 'gen'}`;
   const cached = cache.get<EstimationResult>(cacheKey, 3600000);
   if (cached) return cached;
@@ -119,6 +132,7 @@ export const getConstructionEstimate = async (
 };
 
 export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
+  const ai = getAI();
   const prompt = `Provide a comprehensive 2026 Hyderabad Price Index for ALL major construction materials. 
   Categories to include:
   - Core (Steel, Cement, Sand, Aggregates, Bricks, AAC Blocks)

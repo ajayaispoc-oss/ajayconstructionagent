@@ -41,7 +41,10 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
         const { error, data } = await supabase.auth.signUp({ 
           email, 
           password,
-          options: { data: { full_name: fullName, role: 'agent', phone, location } }
+          options: { 
+            data: { full_name: fullName, role: 'agent', phone, location },
+            emailRedirectTo: window.location.origin
+          }
         });
         if (error) throw error;
         if (data.user) {
