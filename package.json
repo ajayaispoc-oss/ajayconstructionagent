@@ -1,4 +1,3 @@
-
 {
   "name": "ajay-construction-agent",
   "private": true,
@@ -13,6 +12,8 @@
   "dependencies": {
     "@google/genai": "^1.38.0",
     "@supabase/supabase-js": "^2.47.10",
+    "jspdf": "^4.2.0",
+    "jspdf-autotable": "^5.0.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

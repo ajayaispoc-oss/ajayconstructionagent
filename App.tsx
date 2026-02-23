@@ -4,6 +4,7 @@ import { EstimationResult, TaskConfig, MarketPriceList } from './types';
 import { CONSTRUCTION_TASKS } from './constants';
 import { getConstructionEstimate, getRawMaterialPriceList, sendMessageToAssistant } from './services/geminiService';
 import { notifyCloud } from './services/notificationService';
+import { generateInvoicePDF } from './services/pdfService';
 import { supabase } from './services/supabaseClient';
 
 const BRAND_NAME = "Ajay Projects";
@@ -82,7 +83,7 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
             }
           }
           
-          setMessage({ type: 'success', text: `Registration successful. Welcome to ${BRAND_NAME}!` });
+          setMessage({ type: 'success', text: "Registration successful. Please click on the email verification link sent to your email address." });
           onSignupSuccess();
         }
       }
@@ -132,11 +133,12 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
         
         {!isLogin && (
           <div className="mb-8 p-6 bg-blue-50/50 rounded-[2rem] border border-blue-100 text-center">
-            <h3 className="text-[11px] font-black uppercase text-[#1E3A8A] mb-4 tracking-widest">Scan to Pay One-Time Fee: ₹499</h3>
+            <h3 className="text-[11px] font-black uppercase text-[#1E3A8A] mb-4 tracking-widest">Premium Subscription: ₹499/year for unlimited access to estimates.</h3>
             <div className="bg-white p-3 rounded-2xl inline-block shadow-md mb-2 border border-slate-100">
               <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${UPI_ID}&pn=Ajay%20Projects&am=499`)}`} className="w-32 h-32" alt="Subscription QR" />
             </div>
             <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">VPA: {UPI_ID}</p>
+            <p className="text-[9px] font-bold text-slate-500 mt-4 leading-relaxed">Guest users are limited to 3 estimates. Subscription includes full access to all premium features, professional PDF downloads, and priority support.</p>
           </div>
         )}
 
@@ -455,6 +457,18 @@ const App: React.FC = () => {
     setLoading(false);
   };
 
+  const handleDownloadInvoice = async () => {
+    if (!estimate) return;
+    generateInvoicePDF(estimate, formInputs.clientName, formInputs.clientPhone, selectedTask?.title || 'General');
+    await notifyCloud('invoice_generated', { 
+      task: selectedTask?.title, 
+      inputs: formInputs, 
+      result: estimate, 
+      agent: user?.email || (guestPhone ? `Guest: ${guestPhone}` : 'Guest'),
+      agentId: user?.id
+    });
+  };
+
   const executeCalculation = async () => {
     if (isGuest && guestCount >= GUEST_LIMIT) {
       alert(`Free limit of ${GUEST_LIMIT} estimates reached. Please Sign Up as a Premium Agent to continue.`);
@@ -630,6 +644,7 @@ const App: React.FC = () => {
           {estimate && (
             <div className="animate-in max-w-5xl mx-auto space-y-8 pb-20 relative z-10">
               <div className="flex justify-end gap-4 no-print flex-wrap relative z-[200]">
+                <button onClick={handleDownloadInvoice} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-emerald-700 cursor-pointer">Download Invoice</button>
                 <button onClick={() => window.print()} className="bg-[#1E3A8A] text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-blue-800 cursor-pointer">Print Proposal</button>
                 <button onClick={() => {setEstimate(null); setView('estimator');}} className="bg-slate-50 text-slate-800 px-6 py-3 rounded-xl font-black uppercase text-[10px] border border-slate-200 cursor-pointer">New Estimate</button>
               </div>
