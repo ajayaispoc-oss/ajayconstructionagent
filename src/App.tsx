@@ -559,6 +559,7 @@ const App: React.FC = () => {
         <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 py-6 px-10 sticky top-0 z-[1000] shadow-sm no-print">
           <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-4">
             <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}}>
+              <img src="/logo.png" alt="AjayProjects Logo" style={{ height: '50px' }} />
               <div>
                 <h1 className="text-xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
                 <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em] mt-1">
