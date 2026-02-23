@@ -8,7 +8,8 @@ import { generateInvoicePDF } from './services/pdfService';
 import { supabase } from './services/supabaseClient';
 
 const BRAND_NAME = "Ajay Projects";
-const UPI_ID = "ajay.t.me@icici";
+const LOGO_URL = "/logo.png";
+const UPI_ID = "ajay.t.123456789@oksbi";
 const SUPPORT_EMAIL = "ajay.ai.spoc@gmail.com";
 const GUEST_LIMIT = 3;
 const SUBSCRIPTION_FEE = 499;
@@ -125,7 +126,9 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
     <div className="min-h-screen flex items-center justify-center bg-[#F9FBFF] p-6 animate-in">
       <div className="max-w-md w-full bg-white rounded-[3.5rem] shadow-2xl p-10 sm:p-14 border border-slate-100">
         <div className="text-center mb-10">
-          <div className="bg-[#1E3A8A] w-20 h-20 rounded-[2rem] flex items-center justify-center text-4xl text-white mx-auto mb-6 shadow-xl">🏗️</div>
+          <div className="w-24 h-24 mx-auto mb-6">
+            <img src={LOGO_URL} alt={BRAND_NAME} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+          </div>
           <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter">{BRAND_NAME}</h1>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Engineering Portal v2026</p>
         </div>
@@ -531,8 +534,8 @@ const App: React.FC = () => {
       
       <aside className="w-full md:w-20 lg:w-24 bg-[#1E3A8A] md:min-h-screen flex md:flex-col items-center justify-between py-6 px-4 no-print shrink-0 md:sticky md:top-0 z-[1100]">
         <div className="flex flex-col items-center gap-8">
-          <div className="bg-white/10 p-3 rounded-2xl">
-             <div className="text-2xl text-white">🏗️</div>
+          <div className="bg-white p-2 rounded-2xl w-14 h-14">
+             <img src={LOGO_URL} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
           </div>
           <button 
             onClick={() => {if(!user) {setIsGuest(false); setView('estimator'); setSelectedTask(null); setEstimate(null);}}}
@@ -652,7 +655,9 @@ const App: React.FC = () => {
                 <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-bl-[10rem] -mr-32 -mt-32 no-print"></div>
                 <div className="flex justify-between items-start mb-16 relative z-10">
                   <div>
-                    <div className="bg-[#1E3A8A] w-16 h-16 rounded-2xl flex items-center justify-center text-3xl text-white mb-6">🏗️</div>
+                    <div className="w-20 h-20 mb-6">
+                      <img src={LOGO_URL} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                    </div>
                     <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-1">{BRAND_NAME}</h1>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Hyderabad Engineering Index</p>
                   </div>

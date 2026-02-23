@@ -1,11 +1,11 @@
 
 import { jsPDF } from "jspdf";
-import "jspdf-autotable";
-import { EstimationResult } from "../types";
+import autoTable from "jspdf-autotable";
+import { EstimationResult, MaterialItem } from "../types";
 
 const BRAND_NAME = "Ajay Projects";
 const SUPPORT_EMAIL = "ajay.ai.spoc@gmail.com";
-const UPI_ID = "ajay.t.me@icici";
+const UPI_ID = "ajay.t.123456789@oksbi";
 
 export const generateInvoicePDF = (estimate: EstimationResult, clientName: string, clientPhone: string, taskTitle: string) => {
   const doc = new jsPDF();
@@ -35,7 +35,7 @@ export const generateInvoicePDF = (estimate: EstimationResult, clientName: strin
   doc.text(`Project: ${taskTitle}`, 20, 69);
 
   // Table
-  const tableData = estimate.materials.map((m, index) => [
+  const tableData = estimate.materials.map((m: MaterialItem, index: number) => [
     index + 1,
     m.name,
     m.quantity,
@@ -43,7 +43,7 @@ export const generateInvoicePDF = (estimate: EstimationResult, clientName: strin
     `₹${m.totalPrice.toLocaleString()}`
   ]);
 
-  (doc as any).autoTable({
+  autoTable(doc, {
     startY: 80,
     head: [["#", "Material Description", "Qty", "Unit Price", "Total"]],
     body: tableData,
@@ -81,3 +81,4 @@ export const generateInvoicePDF = (estimate: EstimationResult, clientName: strin
 
   doc.save(`AjayProjects_Invoice_${clientName.replace(/\s+/g, '_')}.pdf`);
 };
+
