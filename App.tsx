@@ -43,49 +43,46 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
           password,
           options: { 
             data: { full_name: fullName, role: 'agent', phone, location },
-            emailRedirectTo: window.location.origin
+            emailRedirectTo: window.location.origin + '/?verified=true'
           }
         });
         if (error) throw error;
         if (data.user) {
-          // DATABASE FIX: Aligned with schema: id, full_name, phone, location, is_premium
-          // We use a robust profile sync that handles cases where a trigger might have already fired.
+          // DATABASE SYNC: Use upsert to handle both new signups and potential trigger-created rows.
+          // We include is_premium: false as the default state for new agents.
           const profileData = { 
             id: data.user.id, 
             full_name: fullName, 
-            is_premium: false,
             phone: phone,
-            location: location
+            location: location,
+            is_premium: false
           };
 
-          // Robust profile sync: Try to insert first.
-          const { error: insertError } = await supabase.from('profiles').insert(profileData);
+          // Using upsert with onConflict ensures that if a trigger already created the profile,
+          // we simply update it with the additional details (phone, location) provided in the form.
+          const { error: syncError } = await supabase
+            .from('profiles')
+            .upsert(profileData, { 
+              onConflict: 'id',
+              ignoreDuplicates: false 
+            });
           
-          if (insertError) {
-            // If it already exists (likely created by a trigger), update the existing record
-            if (insertError.code === '23505') {
-              const { error: updateError } = await supabase
-                .from('profiles')
-                .update({ 
-                  full_name: fullName, 
-                  phone: phone, 
-                  location: location 
-                })
-                .eq('id', data.user.id);
-              
-              if (updateError) {
-                console.error("Profile update failed:", updateError);
-                setMessage({ type: 'error', text: "Account created but profile sync failed. Please contact admin." });
-                return;
-              }
-            } else {
-              console.error("Profile insert failed:", insertError);
+          if (syncError) {
+            console.error("Profile synchronization failed:", syncError);
+            // If upsert fails (likely due to RLS on is_premium), try a limited update as a fallback
+            const { error: fallbackError } = await supabase
+              .from('profiles')
+              .update({ full_name: fullName, phone, location })
+              .eq('id', data.user.id);
+
+            if (fallbackError) {
+              console.error("Fallback sync also failed:", fallbackError);
               setMessage({ type: 'error', text: "Account created but profile sync failed. Please contact admin." });
               return;
             }
           }
           
-          setMessage({ type: 'success', text: `Registration successful. Access granted.` });
+          setMessage({ type: 'success', text: `Registration successful. Welcome to ${BRAND_NAME}!` });
           onSignupSuccess();
         }
       }
@@ -169,6 +166,27 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
     </div>
   );
 };
+
+const VerifiedScreen = ({ onLogin }: { onLogin: () => void }) => (
+  <div className="min-h-screen flex items-center justify-center bg-[#F9FBFF] p-6 animate-in">
+    <div className="max-w-md w-full bg-white rounded-[3.5rem] shadow-2xl p-10 sm:p-14 border border-slate-100 text-center">
+      <div className="bg-green-50 w-20 h-20 rounded-[2rem] flex items-center justify-center text-4xl text-green-600 mx-auto mb-6 shadow-xl">✅</div>
+      <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter">Verification Successful</h2>
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-4 leading-relaxed">
+        Thank you for signing up and completing the verification process.
+      </p>
+      <p className="text-sm font-black text-slate-800 uppercase mt-6">
+        Now please login to the app.
+      </p>
+      <button 
+        onClick={onLogin}
+        className="w-full mt-10 bg-[#1E3A8A] text-white py-5 rounded-[1.5rem] text-xs font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
+      >
+        Go to Login
+      </button>
+    </div>
+  </div>
+);
 
 // --- CHATBOT COMPONENT ---
 const ChatBot = ({ isVisible, onClose }: { isVisible: boolean, onClose: () => void }) => {
@@ -355,7 +373,7 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isGuest, setIsGuest] = useState(false);
   const [guestPhone, setGuestPhone] = useState<string | null>(null);
-  const [view, setView] = useState<'estimator' | 'market' | 'history' | 'payments' | 'invoice' | 'premium'>('estimator');
+  const [view, setView] = useState<'estimator' | 'market' | 'history' | 'payments' | 'invoice' | 'premium' | 'verified'>('estimator');
   const [selectedTask, setSelectedTask] = useState<TaskConfig | null>(null);
   const [formInputs, setFormInputs] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
@@ -371,6 +389,12 @@ const App: React.FC = () => {
   });
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('verified') === 'true') {
+      setView('verified');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => { 
       if (session?.user) {
         setUser(session.user);
@@ -484,6 +508,7 @@ const App: React.FC = () => {
   const isApproved = userProfile?.is_premium === true;
   const isPending = user && userProfile && userProfile.is_premium === false;
 
+  if (view === 'verified') return <VerifiedScreen onLogin={() => { setView('estimator'); setIsGuest(false); }} />;
   if (!user && !isGuest) return <AuthScreen onSignupSuccess={() => setView('estimator')} onGuestMode={handleGuestModeInit} />;
 
   return (

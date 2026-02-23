@@ -45,9 +45,18 @@ async function fetchWithRetry(fn: () => Promise<any>, retries = 3, interval = 20
   try {
     return await fn();
   } catch (error: any) {
-    if (retries > 0 && (error?.message?.includes('503') || error?.status === 503 || error?.message?.includes('UNAVAILABLE'))) {
-      await delay(interval);
-      return fetchWithRetry(fn, retries - 1, interval * 1.5);
+    const isRetryable = error?.message?.includes('503') || 
+                       error?.status === 503 || 
+                       error?.message?.includes('UNAVAILABLE') ||
+                       error?.message?.includes('429') ||
+                       error?.status === 429 ||
+                       error?.message?.includes('RESOURCE_EXHAUSTED');
+
+    if (retries > 0 && isRetryable) {
+      // For 429, wait longer
+      const waitTime = (error?.message?.includes('429') || error?.status === 429) ? interval * 2 : interval;
+      await delay(waitTime);
+      return fetchWithRetry(fn, retries - 1, waitTime * 1.5);
     }
     throw error;
   }
@@ -133,6 +142,11 @@ export const getConstructionEstimate = async (
 
 export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
   const ai = getAI();
+  const cacheKey = 'market_price_list';
+  // Cache for 6 hours to minimize API hits
+  const cached = cache.get<MarketPriceList>(cacheKey, 21600000);
+  if (cached) return cached;
+
   const prompt = `Provide a comprehensive 2026 Hyderabad Price Index for ALL major construction materials. 
   Categories to include:
   - Core (Steel, Cement, Sand, Aggregates, Bricks, AAC Blocks)
@@ -160,6 +174,7 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
     }));
     const parsed = JSON.parse(response.text || "{}");
     if (!parsed.categories || !Array.isArray(parsed.categories)) throw new Error("Invalid structure");
+    cache.set(cacheKey, parsed);
     return parsed;
   } catch (err) {
     console.error("Price list fetch error, using fallback data", err);
