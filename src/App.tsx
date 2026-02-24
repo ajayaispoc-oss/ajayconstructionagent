@@ -811,7 +811,7 @@ const App: React.FC = () => {
         }
         .animate-marquee {
           display: inline-block;
-          animation: marquee 120s linear infinite;
+          animation: marquee 50s linear infinite;
           padding-left: 20px;
           min-width: 100%;
         }
