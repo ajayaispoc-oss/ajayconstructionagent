@@ -134,7 +134,7 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
       <div className="max-w-md w-full bg-white rounded-[3.5rem] shadow-2xl p-10 sm:p-14 border border-slate-100">
         <div className="text-center mb-10">
           <div className="w-24 h-24 mx-auto mb-6">
-            <img src={LOGO_URL} alt={BRAND_NAME} width={96} height={96} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+            <img src={LOGO_URL} alt={BRAND_NAME} width={96} height={96} className="w-full h-full object-contain" referrerPolicy="no-referrer" loading="lazy" />
           </div>
           <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter">{BRAND_NAME}</h1>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Engineering Portal v2026</p>
@@ -145,7 +145,7 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
           <div className="mb-8 p-6 bg-blue-50/50 rounded-[2rem] border border-blue-100 text-center">
             <h3 className="text-[11px] font-black uppercase text-[#1E3A8A] mb-4 tracking-widest">Premium Subscription: ₹499/year for unlimited access to estimates.</h3>
             <div className="bg-white p-3 rounded-2xl inline-block shadow-md mb-2 border border-slate-100">
-              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${UPI_ID}&pn=Ajay%20Projects&am=499`)}`} className="w-32 h-32" alt="Subscription QR" />
+              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${UPI_ID}&pn=Ajay%20Projects&am=499`)}`} className="w-32 h-32" alt="Subscription QR" loading="lazy" />
             </div>
             <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">VPA: {UPI_ID}</p>
             <p className="text-[9px] font-bold text-slate-500 mt-4 leading-relaxed">Guest users are limited to 3 estimates. Subscription includes full access to all premium features, professional PDF downloads, and priority support.</p>
@@ -362,7 +362,7 @@ const PaymentBlock = ({ total, upiId }: { total: number, upiId: string }) => {
       <div className="flex flex-col items-center p-8 bg-blue-50/30 rounded-[2.5rem] border border-blue-100">
         <h4 className="text-[10px] font-black uppercase text-[#1E3A8A] mb-6 tracking-widest text-center">Scan to Pay 5% Advance Booking</h4>
         <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xl mb-4">
-          <img src={getQR(advanceAmount)} className="w-48 h-48" alt="Advance Payment QR" />
+          <img src={getQR(advanceAmount)} className="w-48 h-48" alt="Advance Payment QR" loading="lazy" />
         </div>
         <p className="text-xl font-black text-[#1E3A8A]">₹{advanceAmount.toLocaleString()}</p>
         <p className="text-[9px] font-black text-slate-400 mt-2 uppercase">VPA: {upiId}</p>
@@ -370,7 +370,7 @@ const PaymentBlock = ({ total, upiId }: { total: number, upiId: string }) => {
       <div className="flex flex-col items-center p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100">
         <h4 className="text-[10px] font-black uppercase text-slate-800 mb-6 tracking-widest text-center">Scan for 100% Full Payment</h4>
         <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-xl mb-4">
-          <img src={getQR(total)} className="w-48 h-48" alt="Full Payment QR" />
+          <img src={getQR(total)} className="w-48 h-48" alt="Full Payment QR" loading="lazy" />
         </div>
         <p className="text-xl font-black text-slate-800">₹{total.toLocaleString()}</p>
         <p className="text-[9px] font-black text-slate-400 mt-2 uppercase">VPA: {upiId}</p>
@@ -507,7 +507,17 @@ const App: React.FC = () => {
     setLoading(true);
     setEstimate(null);
     try {
-      const result = await getConstructionEstimate(selectedTask.id, formInputs);
+      const cacheKey = `estimate_${selectedTask.id}_${JSON.stringify(formInputs)}`;
+      const cachedData = sessionStorage.getItem(cacheKey);
+      let result;
+      
+      if (cachedData) {
+        result = JSON.parse(cachedData);
+      } else {
+        result = await getConstructionEstimate(selectedTask.id, formInputs);
+        sessionStorage.setItem(cacheKey, JSON.stringify(result));
+      }
+      
       setEstimate(result);
       if (isGuest) setGuestCount(prev => prev + 1);
       
@@ -561,7 +571,7 @@ const App: React.FC = () => {
       <aside className="w-full md:w-20 lg:w-24 bg-[#1E3A8A] md:min-h-screen flex md:flex-col items-center justify-between py-6 px-4 no-print shrink-0 md:sticky md:top-0 z-[1100]">
         <div className="flex flex-col items-center gap-8">
           <div className="bg-white p-2 rounded-2xl w-14 h-14">
-             <img src={LOGO_URL} alt="Logo" width={56} height={56} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+             <img src={LOGO_URL} alt="Logo" width={56} height={56} className="w-full h-full object-contain" referrerPolicy="no-referrer" loading="lazy" />
           </div>
           <button 
             onClick={() => {if(!user) {setIsGuest(false); setView('estimator'); setSelectedTask(null); setEstimate(null);}}}
@@ -585,7 +595,7 @@ const App: React.FC = () => {
         <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 py-6 px-10 sticky top-0 z-[1000] shadow-sm no-print">
           <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-4">
             <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}}>
-              <img src="/logo.png" alt="AjayProjects Logo" width={50} height={50} style={{ height: '50px', width: 'auto' }} />
+              <img src={LOGO_URL} alt="AjayProjects Logo" width={50} height={50} style={{ height: '50px', width: 'auto' }} loading="lazy" />
               <div>
                 <h1 className="text-xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
                 <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em] mt-1">
@@ -691,7 +701,7 @@ const App: React.FC = () => {
                 <div className="flex justify-between items-start mb-16 relative z-10">
                   <div>
                     <div className="w-20 h-20 mb-6">
-                      <img src={LOGO_URL} alt="Logo" width={80} height={80} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                      <img src={LOGO_URL} alt="Logo" width={80} height={80} className="w-full h-full object-contain" referrerPolicy="no-referrer" loading="lazy" />
                     </div>
                     <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-1">{BRAND_NAME}</h1>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Hyderabad Engineering Index</p>
@@ -811,9 +821,10 @@ const App: React.FC = () => {
         }
         .animate-marquee {
           display: inline-block;
-          animation: marquee 50s linear infinite;
+          animation: marquee 60s linear infinite;
           padding-left: 20px;
           min-width: 100%;
+          will-change: transform;
         }
         @media print {
           .no-print { display: none !important; }
