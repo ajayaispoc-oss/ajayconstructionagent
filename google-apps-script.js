@@ -64,7 +64,7 @@ function doGet(e) {
 // Function to send the notification email (Call this from your webhook or trigger)
 function sendNewUserNotification(userEmail, userName, userPhone) {
   // Replace with your actual deployed Web App URL (You get this URL AFTER deploying this script as a Web App)
-  const webAppUrl = 'https://script.google.com/macros/s/AKfycbxmGDuJ-yFZGh39l0v-TIRZBRWY0WWKbWFK7rX-H0Eaf29BazecRIKsWZorwBqxc0bY/exec'; 
+  const webAppUrl = 'https://script.google.com/macros/s/AKfycbxZL4ruosAxPEEQr_lFMeMPhvSJ184wLe4-iU6lucab8r86i5Z8PdBTVeibvzXGG1tZhw/exec'; 
   const approveLink = `${webAppUrl}?approve=${encodeURIComponent(userEmail)}`;
   
   const subject = `New User Signup: ${userName}`;
