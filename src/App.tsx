@@ -11,8 +11,9 @@ const BRAND_NAME = "Ajay Projects";
 const LOGO_URL = "/logo.png";
 const UPI_ID = "ajay.t.123456789@oksbi";
 const SUPPORT_EMAIL = "ajay.ai.spoc@gmail.com";
-const GUEST_LIMIT = 3;
+const GUEST_LIMIT = 2;
 const SUBSCRIPTION_FEE = 499;
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzTH_UDYZmKRWWRFZxNaM_TxWBzBKDGqgfVX3PPac1pcrvo_jP0Fez0DdlpsHhML5kZKg/exec";
 
 // --- AUTHENTICATION SCREEN ---
 const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?: (phone: string) => void, onSignupSuccess: () => void, forceLogin?: boolean }) => {
@@ -90,6 +91,25 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
             agentId: data.user.id,
             event: 'SIGNUP'
           });
+
+          // Trigger Google Apps Script to send Magic Link email
+          try {
+            await fetch(GOOGLE_SCRIPT_URL, {
+              method: 'POST',
+              mode: 'no-cors', // Required to avoid CORS issues with Google Apps Script
+              headers: {
+                'Content-Type': 'text/plain',
+              },
+              body: JSON.stringify({
+                email: email,
+                name: fullName,
+                phone: phone
+              })
+            });
+            console.log("Successfully triggered Google Apps Script for Magic Link.");
+          } catch (scriptError) {
+            console.error("Failed to trigger Google Apps Script:", scriptError);
+          }
 
           setMessage({ type: 'success', text: "Registration successful. Please click on the email verification link sent to your email address." });
           onSignupSuccess();
@@ -437,9 +457,17 @@ const App: React.FC = () => {
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
+    // Check session storage first
+    const cachedProfile = sessionStorage.getItem(`profile_${userId}`);
+    if (cachedProfile) {
+      setUserProfile(JSON.parse(cachedProfile));
+      return;
+    }
+
     // DATABASE FIX: Strictly query schema: id, full_name, phone, location, is_premium
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
     if (!error && data) {
+      sessionStorage.setItem(`profile_${userId}`, JSON.stringify(data));
       setUserProfile(data);
     }
   };
@@ -616,14 +644,21 @@ const App: React.FC = () => {
           {user && isPending && (
              <div className="animate-in max-w-2xl mx-auto py-20 text-center">
                 <div className="bg-orange-50 w-24 h-24 rounded-[3rem] flex items-center justify-center text-5xl mx-auto mb-10 border border-orange-100 shadow-sm">⏳</div>
-                <h2 className="text-3xl font-black uppercase tracking-tighter text-slate-800 mb-4">Subscription Pending Approval</h2>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] leading-relaxed">
-                  Thank you for subscribing! Ajay is currently verifying your ₹499 payment. 
-                  Access to the Premium Index is usually granted within 2 hours.
+                <h2 className="text-3xl font-black uppercase tracking-tighter text-slate-800 mb-4">Waiting for Approval</h2>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] leading-relaxed mb-6">
+                  Once you pay ₹499, your account will be activated within 30 minutes.
                 </p>
-                <div className="mt-12 pt-10 border-t border-slate-100">
-                  <p className="text-[9px] font-black text-slate-400 uppercase">Need help? Contact Admin</p>
-                  <p className="text-sm font-black text-[#1E3A8A] lowercase mt-1">{SUPPORT_EMAIL}</p>
+                <div className="bg-white p-6 rounded-3xl border-2 border-slate-100 shadow-xl mb-8 inline-block">
+                  <h3 className="text-[11px] font-black uppercase text-[#1E3A8A] mb-4 tracking-widest">Scan to Pay</h3>
+                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${UPI_ID}&pn=Ajay%20Projects&am=499`)}`} className="w-32 h-32 mx-auto" alt="Subscription QR" loading="lazy" />
+                  <p className="text-[10px] font-black text-slate-400 mt-4 uppercase">UPI ID: {UPI_ID}</p>
+                </div>
+                <div className="mt-8 pt-10 border-t border-slate-100 flex flex-col items-center gap-4">
+                  <button onClick={() => { sessionStorage.removeItem(`profile_${user.id}`); supabase.auth.signOut(); }} className="px-6 py-3 rounded-xl text-[10px] font-black uppercase bg-red-50 text-red-500 hover:bg-red-100 transition-colors">Logout</button>
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase">Need help? Contact Admin</p>
+                    <p className="text-sm font-black text-[#1E3A8A] lowercase mt-1">{SUPPORT_EMAIL}</p>
+                  </div>
                 </div>
              </div>
           )}
