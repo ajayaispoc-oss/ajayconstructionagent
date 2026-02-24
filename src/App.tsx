@@ -35,7 +35,15 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
       if (isLogin) {
         const { error, data } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        if (data.user) setMessage({ type: 'success', text: "Access granted. Synchronizing portal..." });
+        if (data.user) {
+          setMessage({ type: 'success', text: "Access granted. Synchronizing portal..." });
+          notifyCloud('access' as any, {
+            fullName: email,
+            agent: email,
+            agentId: data.user.id,
+            event: 'LOGIN'
+          });
+        }
       } else {
         if (!fullName) throw new Error("Full Name required.");
         if (!phone) throw new Error("Phone number required.");
@@ -51,7 +59,6 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
         if (error) throw error;
         if (data.user) {
           // DATABASE SYNC: Use upsert to handle both new signups and potential trigger-created rows.
-          // We include is_premium: false as the default state for new agents.
           const profileData = { 
             id: data.user.id, 
             full_name: fullName, 
@@ -60,8 +67,6 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
             is_premium: false
           };
 
-          // Using upsert with onConflict ensures that if a trigger already created the profile,
-          // we simply update it with the additional details (phone, location) provided in the form.
           const { error: syncError } = await supabase
             .from('profiles')
             .upsert(profileData, { 
@@ -71,19 +76,21 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
           
           if (syncError) {
             console.error("Profile synchronization failed:", syncError);
-            // If upsert fails (likely due to RLS on is_premium), try a limited update as a fallback
-            const { error: fallbackError } = await supabase
+            await supabase
               .from('profiles')
               .update({ full_name: fullName, phone, location })
               .eq('id', data.user.id);
-
-            if (fallbackError) {
-              console.error("Fallback sync also failed:", fallbackError);
-              setMessage({ type: 'error', text: "Account created but profile sync failed. Please contact admin." });
-              return;
-            }
           }
           
+          await notifyCloud('access' as any, {
+            fullName,
+            phone,
+            location,
+            agent: email,
+            agentId: data.user.id,
+            event: 'SIGNUP'
+          });
+
           setMessage({ type: 'success', text: "Registration successful. Please click on the email verification link sent to your email address." });
           onSignupSuccess();
         }
@@ -127,7 +134,7 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
       <div className="max-w-md w-full bg-white rounded-[3.5rem] shadow-2xl p-10 sm:p-14 border border-slate-100">
         <div className="text-center mb-10">
           <div className="w-24 h-24 mx-auto mb-6">
-            <img src={LOGO_URL} alt={BRAND_NAME} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+            <img src={LOGO_URL} alt={BRAND_NAME} width={96} height={96} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
           </div>
           <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter">{BRAND_NAME}</h1>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Engineering Portal v2026</p>
@@ -387,6 +394,8 @@ const App: React.FC = () => {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [tickerText, setTickerText] = useState("Loading current market indices...");
+  const [showTerms, setShowTerms] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   
   const [guestCount, setGuestCount] = useState<number>(() => {
     const saved = localStorage.getItem('ajay_guest_count');
@@ -453,7 +462,11 @@ const App: React.FC = () => {
     await notifyCloud('callback_requested', { 
       clientName: formInputs.clientName, 
       clientPhone: formInputs.clientPhone, 
+      fullName: formInputs.clientName,
+      phone: formInputs.clientPhone,
+      location: formInputs.area_location,
       agent: user?.email || (guestPhone ? `Guest: ${guestPhone}` : 'Guest'),
+      agentId: user?.id,
       task: selectedTask?.title || 'General'
     });
     alert("Callback Requested! We will contact the registered mobile number shortly.");
@@ -467,6 +480,10 @@ const App: React.FC = () => {
       task: selectedTask?.title, 
       inputs: formInputs, 
       result: estimate, 
+      fullName: formInputs.clientName,
+      phone: formInputs.clientPhone,
+      location: formInputs.area_location,
+      totalCost: estimate.totalEstimatedCost,
       agent: user?.email || (guestPhone ? `Guest: ${guestPhone}` : 'Guest'),
       agentId: user?.id
     });
@@ -494,13 +511,22 @@ const App: React.FC = () => {
       setEstimate(result);
       if (isGuest) setGuestCount(prev => prev + 1);
       
-      await notifyCloud('quote_requested', { 
+      const payload = { 
         task: selectedTask.title, 
         inputs: formInputs, 
         result, 
         agent: user?.email || (guestPhone ? `Guest: ${guestPhone}` : 'Guest'), 
-        agentId: user?.id 
-      });
+        agentId: user?.id,
+        // Explicit mapping for email payload
+        fullName: formInputs.clientName,
+        phone: formInputs.clientPhone,
+        location: formInputs.area_location,
+        serviceType: selectedTask.title,
+        totalCost: result.totalEstimatedCost,
+        agentProfile: userProfile
+      };
+
+      await notifyCloud('quote_requested', payload);
     } catch (err: any) { 
       alert(err.message || "Engineering service at capacity. Please try again."); 
     } finally { setLoading(false); }
@@ -535,7 +561,7 @@ const App: React.FC = () => {
       <aside className="w-full md:w-20 lg:w-24 bg-[#1E3A8A] md:min-h-screen flex md:flex-col items-center justify-between py-6 px-4 no-print shrink-0 md:sticky md:top-0 z-[1100]">
         <div className="flex flex-col items-center gap-8">
           <div className="bg-white p-2 rounded-2xl w-14 h-14">
-             <img src={LOGO_URL} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+             <img src={LOGO_URL} alt="Logo" width={56} height={56} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
           </div>
           <button 
             onClick={() => {if(!user) {setIsGuest(false); setView('estimator'); setSelectedTask(null); setEstimate(null);}}}
@@ -549,7 +575,7 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex flex-col">
         <div className="bg-[#1E3A8A] text-white py-2 overflow-hidden whitespace-nowrap no-print border-b border-white/10">
           <div className="inline-block animate-marquee uppercase text-[10px] font-black tracking-widest px-4">
             {tickerText}
@@ -559,7 +585,7 @@ const App: React.FC = () => {
         <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 py-6 px-10 sticky top-0 z-[1000] shadow-sm no-print">
           <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-4">
             <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}}>
-              <img src="/logo.png" alt="AjayProjects Logo" style={{ height: '50px' }} />
+              <img src="/logo.png" alt="AjayProjects Logo" width={50} height={50} style={{ height: '50px', width: 'auto' }} />
               <div>
                 <h1 className="text-xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
                 <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em] mt-1">
@@ -648,6 +674,14 @@ const App: React.FC = () => {
           {estimate && (
             <div className="animate-in max-w-5xl mx-auto space-y-8 pb-20 relative z-10">
               <div className="flex justify-end gap-4 no-print flex-wrap relative z-[200]">
+                <button onClick={() => {
+                  if (!estimate || !selectedTask) return;
+                  const text = `🚀 Construction Estimate from AjayProjects.com\nProject: ${selectedTask.title}\nTotal Estimated Cost: ₹${estimate.totalEstimatedCost.toLocaleString()}\nGet your own instant renovation or construction estimate at: https://ajayprojects.com`;
+                  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                }} className="bg-[#25D366] text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-[#128C7E] cursor-pointer flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                  Share to WhatsApp
+                </button>
                 <button onClick={handleDownloadInvoice} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-emerald-700 cursor-pointer">Download Invoice</button>
                 <button onClick={() => window.print()} className="bg-[#1E3A8A] text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-blue-800 cursor-pointer">Print Proposal</button>
                 <button onClick={() => {setEstimate(null); setView('estimator');}} className="bg-slate-50 text-slate-800 px-6 py-3 rounded-xl font-black uppercase text-[10px] border border-slate-200 cursor-pointer">New Estimate</button>
@@ -657,7 +691,7 @@ const App: React.FC = () => {
                 <div className="flex justify-between items-start mb-16 relative z-10">
                   <div>
                     <div className="w-20 h-20 mb-6">
-                      <img src={LOGO_URL} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                      <img src={LOGO_URL} alt="Logo" width={80} height={80} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                     </div>
                     <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter mb-1">{BRAND_NAME}</h1>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Hyderabad Engineering Index</p>
@@ -714,7 +748,61 @@ const App: React.FC = () => {
              </div>
           )}
         </main>
+        {/* Footer */}
+        <footer className="bg-white border-t border-slate-200 py-6 px-4 text-center text-[12px] text-slate-500 no-print z-50 relative mt-auto">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <p className="font-medium">© 2026 AjayProjects.com | All Rights Reserved.</p>
+            <div className="flex gap-6">
+              <button onClick={() => setShowTerms(true)} className="hover:text-[#1E3A8A] transition-colors underline underline-offset-4">Terms & Conditions</button>
+              <button onClick={() => setShowPrivacy(true)} className="hover:text-[#1E3A8A] transition-colors underline underline-offset-4">Privacy Policy</button>
+            </div>
+          </div>
+        </footer>
       </div>
+
+      {/* Terms Modal */}
+      {showTerms && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[2000] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-8 shadow-2xl animate-in relative">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter">Terms & Conditions</h2>
+              <button onClick={() => setShowTerms(false)} className="text-slate-400 hover:text-slate-800 text-2xl leading-none">&times;</button>
+            </div>
+            <div className="space-y-4 text-sm text-slate-600 leading-relaxed">
+              <p>Welcome to AjayProjects.com. By using our platform, you agree to the following terms:</p>
+              <h3 className="font-bold text-slate-800 mt-4">1. AI Estimates are Approximations</h3>
+              <p>The construction and renovation estimates provided by our AI engine are <strong>rough approximations</strong> based on current market averages and historical data. They are designed for preliminary planning purposes only.</p>
+              <h3 className="font-bold text-slate-800 mt-4">2. Professional Consultation Required</h3>
+              <p>You must consult a certified professional engineer, architect, or contractor before commencing any construction work or making financial commitments based on these estimates.</p>
+              <h3 className="font-bold text-slate-800 mt-4">3. Limitation of Liability</h3>
+              <p>AjayProjects.com and its affiliates shall not be held liable for any discrepancies between the AI-generated estimates and actual project costs, nor for any damages arising from the use of this platform.</p>
+            </div>
+            <button onClick={() => setShowTerms(false)} className="mt-8 w-full bg-[#1E3A8A] text-white py-4 rounded-xl font-black uppercase tracking-widest hover:bg-blue-800 transition-colors">I Understand</button>
+          </div>
+        </div>
+      )}
+
+      {/* Privacy Modal */}
+      {showPrivacy && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[2000] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-8 shadow-2xl animate-in relative">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter">Privacy Policy</h2>
+              <button onClick={() => setShowPrivacy(false)} className="text-slate-400 hover:text-slate-800 text-2xl leading-none">&times;</button>
+            </div>
+            <div className="space-y-4 text-sm text-slate-600 leading-relaxed">
+              <p>Your privacy is important to us at AjayProjects.com. This policy outlines how we handle your data.</p>
+              <h3 className="font-bold text-slate-800 mt-4">1. Data Processing</h3>
+              <p>We use <strong>Google Gemini</strong> to process estimation requests and generate AI-driven insights. We use <strong>Supabase</strong> for secure authentication and database management.</p>
+              <h3 className="font-bold text-slate-800 mt-4">2. Use of Information</h3>
+              <p>The information you provide (such as project details, location, and contact info) is used <strong>only for project estimation</strong>, generating your personalized quotes, and providing customer support.</p>
+              <h3 className="font-bold text-slate-800 mt-4">3. Data Security</h3>
+              <p>We implement industry-standard security measures to protect your personal information from unauthorized access or disclosure.</p>
+            </div>
+            <button onClick={() => setShowPrivacy(false)} className="mt-8 w-full bg-[#1E3A8A] text-white py-4 rounded-xl font-black uppercase tracking-widest hover:bg-blue-800 transition-colors">Close</button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes marquee {

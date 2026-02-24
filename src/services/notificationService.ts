@@ -20,23 +20,33 @@ export const notifyCloud = async (event: CloudEvent, payload: any) => {
   const rawAgentId = payload.agentId || null;
   const agentId = (rawAgentId && uuidRegex.test(rawAgentId)) ? rawAgentId : null;
   
-  const clientName = inputs.clientName || payload.clientName || "Engineering Prospect";
+  const clientName = payload.fullName || inputs.clientName || payload.clientName || "Engineering Prospect";
   
   // 2. Strict Mapping Strategy for Webhook
+  let eventName = event.toUpperCase();
+  if (event === 'quote_requested') eventName = 'QUOTE_REQUESTED';
+  if (event === 'access' && payload.event === 'LOGIN') eventName = 'USER_LOGIN';
+  if (event === 'access' && payload.event === 'SIGNUP') eventName = 'USER_SIGNUP';
+
+  const totalQuoteValue = result.totalEstimatedCost || payload.totalCost;
+
   const webhookPayload = {
-    "Event": event.toUpperCase(),
+    "Event": eventName,
     "User Name": clientName,
-    "Mobile": inputs.clientPhone || payload.clientPhone || "0",
-    "Location": inputs.area_location || payload.area_location || "Not Selected",
-    "Service": payload.task || inputs.project_subtype || "General Inquiry",
-    "Total Quote": result.totalEstimatedCost ? `₹${result.totalEstimatedCost.toLocaleString()}` : "Calculation Only",
+    "Mobile": payload.phone || inputs.clientPhone || payload.clientPhone || "0",
+    "Location": payload.location || inputs.area_location || payload.area_location || "Not Selected",
+    "Service": payload.serviceType || payload.task || inputs.project_subtype || "General Inquiry",
+    "Total Quote": totalQuoteValue ? `₹${totalQuoteValue.toLocaleString()}` : "N/A",
     "Timestamp": timestamp,
     "Domain": "ajayprojects.com",
     "AdminRecipient": "ajay.ai.spoc@gmail.com",
-    "AgentContext": payload.agent || "Guest Portal"
+    "AgentContext": payload.agent || "Guest Portal",
+    "FullData": JSON.stringify(result && Object.keys(result).length > 0 ? result : payload)
   };
 
-  const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbx461H4dAuwgPus4AW5mcjQgaNJaxWqlRYk4SQvEAldYmeIWyC-WgB5vYPouzeyH8hcWw/exec";
+  const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxzYXyzkiJnih5MMWsUx8HV5F2je8A8zw6mS96o91EGCXKoU2gB1rJdsf0rSp9HMqyK/exec";
+
+  console.log('Email Payload:', webhookPayload);
 
   // Fire-and-forget for the webhook
   fetch(WEBHOOK_URL, {
@@ -44,6 +54,9 @@ export const notifyCloud = async (event: CloudEvent, payload: any) => {
     mode: 'no-cors',
     cache: 'no-cache',
     keepalive: true,
+    headers: {
+      'Content-Type': 'text/plain'
+    },
     body: JSON.stringify(webhookPayload)
   }).catch(() => {});
 
