@@ -69,7 +69,7 @@ export const notifyCloud = async (event: CloudEvent, payload: any) => {
         category: String(webhookPayload["Service"]),
         inputs: inputs,
         result: result,
-        agent_id: agentId // Validated UUID or null
+        user_id: agentId // Validated UUID or null
       });
       
       if (error) {

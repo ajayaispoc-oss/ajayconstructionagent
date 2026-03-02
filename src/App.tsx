@@ -11,7 +11,7 @@ const BRAND_NAME = "Ajay Projects";
 const LOGO_URL = "/logo.png";
 const UPI_ID = "ajay.t.123456789@oksbi";
 const SUPPORT_EMAIL = "ajay.ai.spoc@gmail.com";
-const GUEST_LIMIT = 3;
+const GUEST_LIMIT = 2;
 const SUBSCRIPTION_FEE = 499;
 
 // --- AUTHENTICATION SCREEN ---
@@ -52,7 +52,7 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
           email, 
           password,
           options: { 
-            data: { full_name: fullName, role: 'agent', phone, location },
+            data: { full_name: fullName, role: 'agent', phone, location, email: email.toLowerCase() },
             emailRedirectTo: window.location.origin + '/?verified=true'
           }
         });
@@ -63,8 +63,7 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
             id: data.user.id, 
             full_name: fullName, 
             phone: phone,
-            location: location,
-            is_premium: false
+            location: location
           };
 
           const { error: syncError } = await supabase
@@ -446,7 +445,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (user && view === 'history') {
-      supabase.from('estimations').select('*').eq('agent_id', user.id).order('created_at', { ascending: false }).limit(20)
+      supabase.from('estimations').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20)
         .then(({ data }) => setHistory(data || []));
     }
   }, [user, view]);
@@ -813,6 +812,14 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* SEO Keywords Block - Visually Hidden */}
+      <div className="sr-only">
+        <h2>Construction cost in Hyderabad</h2>
+        <p>Houser rennovation, urban company, cement prices in hyderabad, houser painting, asian paints, building paint, Troop Bazar hardware price list 2026, New bathroom installation, hyderbad real estate, House renovation cost calculator India, Painting cost per square foot Hyderabad, Latest cement and steel prices in Telangana, new flat construction.</p>
+        <h3>AI construction estimation tool</h3>
+        <p>Home repair budget calculator, Itemized building material estimates, Flooring and Tiling price.</p>
+      </div>
 
       <style>{`
         @keyframes marquee {
