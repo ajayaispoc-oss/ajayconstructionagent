@@ -6,6 +6,7 @@ import { getConstructionEstimate, getRawMaterialPriceList, sendMessageToAssistan
 import { notifyCloud } from './services/notificationService';
 import { generateInvoicePDF } from './services/pdfService';
 import { supabase } from './services/supabaseClient';
+import TaxPaymentDashboard from './components/TaxPaymentDashboard';
 
 const BRAND_NAME = "Ajay Projects";
 const LOGO_URL = "/logo.png";
@@ -116,6 +117,11 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
             <div className="bg-[#1E3A8A] w-20 h-20 rounded-[2rem] flex items-center justify-center text-4xl text-white mx-auto mb-6 shadow-xl">📞</div>
             <h2 className="text-2xl font-black text-[#1E3A8A] uppercase tracking-tighter">Guest Registration</h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Required for project tracking</p>
+            <div className="mt-8 px-2">
+              <p className="text-[11px] font-black text-red-600 uppercase tracking-widest leading-relaxed animate-pulse">
+                Generate your house construction and Renovation expenditure and pay property tax and other govt bills
+              </p>
+            </div>
           </div>
           {message && <div className={`mb-8 p-5 rounded-[1.5rem] text-[11px] font-bold uppercase text-center border ${message.type === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>{message.text}</div>}
           <form onSubmit={handleGuestSubmit} className="space-y-4">
@@ -137,6 +143,11 @@ const AuthScreen = ({ onGuestMode, onSignupSuccess, forceLogin }: { onGuestMode?
           </div>
           <h1 className="text-3xl font-black text-[#1E3A8A] uppercase tracking-tighter">{BRAND_NAME}</h1>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Engineering Portal v2026</p>
+          <div className="mt-8 px-2">
+            <p className="text-[11px] font-black text-red-600 uppercase tracking-widest leading-relaxed animate-pulse">
+              Generate your house construction and Renovation expenditure and pay property tax and other govt bills
+            </p>
+          </div>
         </div>
         {message && <div className={`mb-8 p-5 rounded-[1.5rem] text-[11px] font-bold uppercase text-center border ${message.type === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>{message.text}</div>}
         
@@ -384,7 +395,7 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isGuest, setIsGuest] = useState(false);
   const [guestPhone, setGuestPhone] = useState<string | null>(null);
-  const [view, setView] = useState<'estimator' | 'market' | 'history' | 'payments' | 'invoice' | 'premium' | 'verified'>('estimator');
+  const [view, setView] = useState<'estimator' | 'market' | 'history' | 'tax_payments' | 'invoice' | 'premium' | 'verified'>('estimator');
   const [selectedTask, setSelectedTask] = useState<TaskConfig | null>(null);
   const [formInputs, setFormInputs] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
@@ -605,6 +616,7 @@ const App: React.FC = () => {
             <div className="flex gap-2">
               <button onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'estimator' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Estimator</button>
               <button onClick={() => setView('market')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'market' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Market</button>
+              <button onClick={() => setView('tax_payments')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'tax_payments' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Tax Payments</button>
               {user && <button onClick={() => setView('history')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'history' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>History</button>}
               <button onClick={() => user ? supabase.auth.signOut() : setIsGuest(false)} className="px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase bg-red-50 text-red-500">Exit</button>
             </div>
@@ -756,6 +768,8 @@ const App: React.FC = () => {
                )) : <div className="col-span-full py-32 text-center opacity-30 text-4xl font-black uppercase tracking-widest">📁 NO RECORDS</div>}
              </div>
           )}
+
+          {view === 'tax_payments' && <TaxPaymentDashboard />}
         </main>
         {/* Footer */}
         <footer className="bg-white border-t border-slate-200 py-6 px-4 text-center text-[12px] text-slate-500 no-print z-50 relative mt-auto">
