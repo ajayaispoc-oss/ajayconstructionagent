@@ -216,3 +216,35 @@ export const getRawMaterialPriceList = async (): Promise<MarketPriceList> => {
     };
   }
 };
+
+export const translateTechSpeak = async (
+  text: string,
+  mode: string,
+  tone: string
+): Promise<string> => {
+  const ai = getAI();
+  const prompt = `You are an expert Corporate Tech Translator. 
+  Translate/Transform the following text according to the mode and tone specified.
+  
+  Text to translate:
+  """
+  ${text}
+  """
+  
+  Translation Mode: ${mode}
+  Desired Tone: ${tone}
+  
+  Provide only the high-quality translated text. Do not add conversational intro, outro, or quote marks. Just output the direct result. Ensure it is clear, professional and formatted nicely if needed.`;
+
+  try {
+    const response = await fetchWithRetry(() => ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+    }));
+    return response.text || "Could not generate translation.";
+  } catch (error: any) {
+    console.error("Translation Error:", error);
+    throw new Error(error.message || "Translation failed due to overloaded servers. Please try again.");
+  }
+};
+

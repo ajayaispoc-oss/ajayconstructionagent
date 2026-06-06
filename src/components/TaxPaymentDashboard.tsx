@@ -33,7 +33,11 @@ const TAX_SERVICES: TaxService[] = [
   }
 ];
 
-const TaxPaymentDashboard: React.FC = () => {
+interface TaxPaymentDashboardProps {
+  displayName: string;
+}
+
+const TaxPaymentDashboard: React.FC<TaxPaymentDashboardProps> = ({ displayName }) => {
   const [selectedService, setSelectedService] = useState<TaxService | null>(null);
 
   const handlePayNow = (service: TaxService) => {
@@ -49,9 +53,14 @@ const TaxPaymentDashboard: React.FC = () => {
 
   return (
     <div className="animate-in">
-      <div className="mb-12 text-center">
+      <div className="mb-12 text-center space-y-3">
+        <span className="px-4 py-1.5 rounded-full bg-blue-50 text-[#1E3A8A] border border-blue-100 text-[10px] font-black uppercase tracking-widest">
+          Secure Tax Payments for {displayName}
+        </span>
         <h2 className="text-4xl font-black uppercase tracking-tighter text-slate-900">Tax & Utility Payments</h2>
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Secure External Payment Gateway Redirects</p>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider leading-relaxed">
+          {displayName}, you can pay your municipal water tax, property bills, property tax, and TSSPDCL electricity bills securely through direct portals here.
+        </p>
       </div>
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 pb-20">

@@ -7,6 +7,11 @@ import { notifyCloud } from './services/notificationService';
 import { generateInvoicePDF } from './services/pdfService';
 import { supabase } from './services/supabaseClient';
 import TaxPaymentDashboard from './components/TaxPaymentDashboard';
+import CorporateTranslator from './components/CorporateTranslator';
+import FinancialCalculators from './components/FinancialCalculators';
+import StickyNotes from './components/StickyNotes';
+import MarketFinance from './components/MarketFinance';
+
 
 const BRAND_NAME = "Ajay Projects";
 const LOGO_URL = "/logo.png";
@@ -395,7 +400,8 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isGuest, setIsGuest] = useState(false);
   const [guestPhone, setGuestPhone] = useState<string | null>(null);
-  const [view, setView] = useState<'estimator' | 'market' | 'history' | 'tax_payments' | 'invoice' | 'premium' | 'verified'>('estimator');
+  const [view, setView] = useState<'translator' | 'finance' | 'notes' | 'construction' | 'market_finance' | 'estimator' | 'market' | 'history' | 'tax_payments' | 'invoice' | 'premium' | 'verified'>('translator');
+  const [constructionTab, setConstructionTab] = useState<'estimator' | 'market' | 'tax_payments' | 'history'>('estimator');
   const [selectedTask, setSelectedTask] = useState<TaskConfig | null>(null);
   const [formInputs, setFormInputs] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
@@ -406,6 +412,18 @@ const App: React.FC = () => {
   const [tickerText, setTickerText] = useState("Loading current market indices...");
   const [showTerms, setShowTerms] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+
+  // Derive activeMainView cleanly and sync with construction sub-tabs
+  const activeMainView = ['translator', 'finance', 'notes', 'construction', 'market_finance'].includes(view as any)
+    ? (view as any)
+    : 'construction';
+
+  useEffect(() => {
+    if (['estimator', 'market', 'tax_payments', 'history'].includes(view)) {
+      setConstructionTab(view as any);
+    }
+  }, [view]);
+
   
   const [guestCount, setGuestCount] = useState<number>(() => {
     const saved = localStorage.getItem('ajay_guest_count');
@@ -571,11 +589,21 @@ const App: React.FC = () => {
   const isApproved = userProfile?.is_premium === true;
   const isPending = user && userProfile && userProfile.is_premium === false;
 
-  if (view === 'verified') return <VerifiedScreen onLogin={() => { setView('estimator'); setIsGuest(false); }} />;
-  if (!user && !isGuest) return <AuthScreen onSignupSuccess={() => setView('estimator')} onGuestMode={handleGuestModeInit} />;
+  const getDisplayName = () => {
+    if (userProfile?.full_name) return userProfile.full_name;
+    if (user?.email) {
+      const part = user.email.split('@')[0].split('.')[0];
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    }
+    return 'Ajay';
+  };
+  const displayName = getDisplayName();
+
+  if (view === 'verified') return <VerifiedScreen onLogin={() => { setView('translator'); setIsGuest(false); }} />;
+  if (!user && !isGuest) return <AuthScreen onSignupSuccess={() => setView('translator')} onGuestMode={handleGuestModeInit} />;
 
   return (
-    <div className="min-h-screen bg-[#F9FBFF] font-sans pb-28 flex flex-col md:flex-row relative">
+    <div className="min-h-screen bg-[#F9FBFF] text-slate-800 font-sans pb-28 flex flex-col md:flex-row relative animate-in">
       <ChatBot isVisible={isChatOpen} onClose={() => setIsChatOpen(false)} />
       
       <aside className="w-full md:w-20 lg:w-24 bg-[#1E3A8A] md:min-h-screen flex md:flex-col items-center justify-between py-6 px-4 no-print shrink-0 md:sticky md:top-0 z-[1100]">
@@ -584,7 +612,7 @@ const App: React.FC = () => {
              <img src={LOGO_URL} alt="Logo" width={56} height={56} className="w-full h-full object-contain" referrerPolicy="no-referrer" loading="lazy" />
           </div>
           <button 
-            onClick={() => {if(!user) {setIsGuest(false); setView('estimator'); setSelectedTask(null); setEstimate(null);}}}
+            onClick={() => {if(!user) {setIsGuest(false); setView('translator'); setSelectedTask(null); setEstimate(null);}}}
             className="group relative flex flex-col items-center gap-2"
           >
             <div className={`p-4 rounded-2xl transition-all ${!user ? 'bg-blue-500 shadow-lg scale-110' : 'bg-white/5 hover:bg-white/10'}`}>
@@ -596,15 +624,15 @@ const App: React.FC = () => {
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="bg-[#1E3A8A] text-white py-2 overflow-hidden whitespace-nowrap no-print border-b border-white/10">
+        <div className="bg-[#1E3A8A] text-white py-2.5 overflow-hidden whitespace-nowrap no-print border-b border-white/10 font-mono text-[9px] font-black tracking-widest uppercase mb-0">
           <div className="inline-block animate-marquee uppercase text-[10px] font-black tracking-widest px-4">
             {tickerText}
           </div>
         </div>
 
         <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 py-6 px-10 sticky top-0 z-[1000] shadow-sm no-print">
-          <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-4">
-            <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}}>
+          <div className="max-w-7xl mx-auto flex flex-col xl:flex-row justify-between items-center gap-6">
+            <div className="flex items-center gap-4 cursor-pointer self-start xl:self-auto" onClick={() => {setView('translator'); setSelectedTask(null); setEstimate(null);}}>
               <img src={LOGO_URL} alt="AjayProjects Logo" width={50} height={50} style={{ height: '50px', width: 'auto' }} loading="lazy" />
               <div>
                 <h1 className="text-xl font-black text-[#1E3A8A] uppercase tracking-tighter leading-none">{BRAND_NAME}</h1>
@@ -613,17 +641,21 @@ const App: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => {setView('estimator'); setSelectedTask(null); setEstimate(null);}} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'estimator' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Estimator</button>
-              <button onClick={() => setView('market')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'market' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Market</button>
-              <button onClick={() => setView('tax_payments')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'tax_payments' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>Tax Payments</button>
-              {user && <button onClick={() => setView('history')} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest ${view === 'history' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-400'}`}>History</button>}
-              <button onClick={() => user ? supabase.auth.signOut() : setIsGuest(false)} className="px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase bg-red-50 text-red-500">Exit</button>
+             <div className="flex-1 flex justify-center w-full">
+              <div className="flex flex-wrap justify-center gap-2">
+                <button onClick={() => { setView('construction'); setConstructionTab('estimator'); setSelectedTask(null); setEstimate(null); }} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest transition-all ${activeMainView === 'construction' ? 'bg-[#1E3A8A] text-white shadow-lg shadow-[#1E3A8A]/25' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-800'}`}>Construction Agent</button>
+                <button onClick={() => { setView('notes'); setSelectedTask(null); setEstimate(null); }} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest transition-all ${activeMainView === 'notes' ? 'bg-[#1E3A8A] text-white shadow-lg shadow-[#1E3A8A]/25' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-800'}`}>Workspace Notes</button>
+                <button onClick={() => { setView('translator'); setSelectedTask(null); setEstimate(null); }} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest transition-all ${activeMainView === 'translator' ? 'bg-[#1E3A8A] text-white shadow-lg shadow-[#1E3A8A]/25' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-800'}`}>Business English Translation</button>
+                <button onClick={() => { setView('finance'); setSelectedTask(null); setEstimate(null); }} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest transition-all ${activeMainView === 'finance' ? 'bg-[#1E3A8A] text-white shadow-lg shadow-[#1E3A8A]/25' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-800'}`}>Financial Calculator</button>
+                <button onClick={() => { setView('market_finance'); setSelectedTask(null); setEstimate(null); }} className={`px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase tracking-widest transition-all ${activeMainView === 'market_finance' ? 'bg-[#1E3A8A] text-white shadow-lg shadow-[#1E3A8A]/25' : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-800'}`}>Market Finance</button>
+                <button onClick={() => user ? supabase.auth.signOut() : setIsGuest(false)} className="px-5 py-3 rounded-[1.2rem] text-[9px] font-black uppercase bg-red-50 border border-red-100 text-red-500 hover:bg-red-100/70 transition-all">Exit</button>
+              </div>
             </div>
           </div>
         </header>
 
-        <main className="max-w-7xl mx-auto px-6 sm:px-10 pt-16">
+        <main className="max-w-7xl mx-auto px-6 sm:px-10 pt-16 w-full">
+
           {user && isPending && (
              <div className="animate-in max-w-2xl mx-auto py-20 text-center">
                 <div className="bg-orange-50 w-24 h-24 rounded-[3rem] flex items-center justify-center text-5xl mx-auto mb-10 border border-orange-100 shadow-sm">⏳</div>
@@ -639,35 +671,54 @@ const App: React.FC = () => {
              </div>
           )}
 
-          {(!user || isApproved) && view === 'estimator' && !estimate && !selectedTask && (
-            <div className="animate-in">
-              <div className="mb-12 text-center">
-                <h2 className="text-4xl font-black uppercase tracking-tighter text-slate-900">Engineering Services Portal</h2>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Hyderabad 2026 Material Index Projections</p>
-              </div>
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {CONSTRUCTION_TASKS.map(t => (
-                  <div key={t.id} onClick={() => setSelectedTask(t)} className="p-10 bg-white rounded-[3.5rem] border hover:border-[#1E3A8A] transition-all cursor-pointer shadow-sm group relative overflow-hidden">
-                    <div className="text-5xl mb-6 bg-slate-50 w-20 h-20 rounded-[2rem] flex items-center justify-center group-hover:bg-blue-50 transition-colors">{t.icon}</div>
-                    <h3 className="text-xl font-black uppercase tracking-tight mb-2 group-hover:text-[#1E3A8A] transition-colors">{t.title}</h3>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed opacity-60">{t.description}</p>
-                  </div>
-                ))}
-              </div>
+          {activeMainView === 'translator' && <CorporateTranslator displayName={displayName} />}
+          {activeMainView === 'finance' && <FinancialCalculators displayName={displayName} />}
+          {activeMainView === 'notes' && <StickyNotes displayName={displayName} />}
+          {activeMainView === 'market_finance' && <MarketFinance displayName={displayName} />}
+
+          {activeMainView === 'construction' && (
+            <div className="flex justify-center flex-wrap gap-2 mb-12 max-w-4xl mx-auto bg-slate-100 p-2 rounded-2xl border border-slate-200">
+              <button onClick={() => { setConstructionTab('estimator'); setEstimate(null); setSelectedTask(null); }} className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${constructionTab === 'estimator' ? 'bg-[#1E3A8A] text-white shadow-md shadow-[#1E3A8A]/10' : 'text-slate-500 hover:text-[#1E3A8A]'}`}>Cost Estimator</button>
+              <button onClick={() => setConstructionTab('market')} className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${constructionTab === 'market' ? 'bg-[#1E3A8A] text-white shadow-md shadow-[#1E3A8A]/10' : 'text-slate-500 hover:text-[#1E3A8A]'}`}>Market Material Index</button>
+              <button onClick={() => setConstructionTab('tax_payments')} className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${constructionTab === 'tax_payments' ? 'bg-[#1E3A8A] text-white shadow-md shadow-[#1E3A8A]/10' : 'text-slate-500 hover:text-[#1E3A8A]'}`}>Tax Payments</button>
+              {user && <button onClick={() => setConstructionTab('history')} className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${constructionTab === 'history' ? 'bg-[#1E3A8A] text-white shadow-md shadow-[#1E3A8A]/10' : 'text-slate-500 hover:text-[#1E3A8A]'}`}>History Ledger</button>}
             </div>
           )}
 
-          {(!user || isApproved) && selectedTask && !estimate && (
-            <div className="max-w-4xl mx-auto bg-white p-10 sm:p-14 rounded-[4rem] border shadow-2xl animate-in">
+          {activeMainView === 'construction' && (!user || isApproved) && constructionTab === 'estimator' && !estimate && !selectedTask && (
+            <div className="animate-in">
+              <div className="mb-12 text-center space-y-3">
+                <span className="px-4 py-1.5 rounded-full bg-blue-50 text-[#1E3A8A] border border-blue-100 text-[10px] font-black uppercase tracking-widest">
+                  Construction Cost Estimator for {displayName}
+                </span>
+                <h2 className="text-4xl font-black uppercase tracking-tighter text-slate-900">Construction Cost Estimator</h2>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider leading-relaxed">
+                  {displayName}, you can calculate your home construction and renovation expenditure, brick walls, and concrete flooring costs here.
+                </p>
+               </div>
+               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                 {CONSTRUCTION_TASKS.map(t => (
+                   <div key={t.id} onClick={() => setSelectedTask(t)} className="p-10 bg-white rounded-[3.5rem] border border-slate-100 hover:border-[#1E3A8A] transition-all cursor-pointer shadow-sm group relative overflow-hidden text-slate-800">
+                     <div className="text-5xl mb-6 bg-slate-50 w-20 h-20 rounded-[2rem] flex items-center justify-center group-hover:bg-blue-50 transition-colors">{t.icon}</div>
+                     <h3 className="text-xl font-black uppercase tracking-tight mb-2 group-hover:text-[#1E3A8A] transition-colors">{t.title}</h3>
+                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed opacity-60">{t.description}</p>
+                   </div>
+                 ))}
+               </div>
+            </div>
+          )}
+
+          {activeMainView === 'construction' && (!user || isApproved) && selectedTask && !estimate && (
+            <div className="max-w-4xl mx-auto bg-white p-10 sm:p-14 rounded-[4rem] border border-slate-100 shadow-2xl animate-in text-slate-800">
               <button onClick={() => setSelectedTask(null)} className="mb-10 text-[9px] font-black uppercase text-[#1E3A8A] bg-blue-50 px-6 py-3 rounded-full hover:bg-blue-100 transition-colors">← Back</button>
               <h2 className="text-2xl font-black uppercase mb-12 tracking-tight text-[#1E3A8A]">{selectedTask.title} Configuration</h2>
               <div className="grid md:grid-cols-2 gap-8">
                 {selectedTask.fields.filter(isFieldVisible).map(f => (
                   <div key={f.name} className="space-y-2">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">{f.label}</label>
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">{f.label}</label>
                     {f.type === 'select' ? (
                       <select 
-                        className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.2rem] px-6 py-4 text-xs font-bold outline-none"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-[#1E3A8A] rounded-[1.2rem] px-6 py-4 text-xs font-bold text-slate-850 focus:bg-white outline-none transition-all"
                         value={formInputs[f.name] || ''}
                         onChange={(e) => setFormInputs({...formInputs, [f.name]: e.target.value})}
                       >
@@ -676,7 +727,7 @@ const App: React.FC = () => {
                       </select>
                     ) : (
                       <input 
-                        className="w-full bg-slate-50 border-2 border-transparent focus:border-[#1E3A8A] rounded-[1.2rem] px-6 py-4 text-xs font-bold outline-none" 
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-[#1E3A8A] rounded-[1.2rem] px-6 py-4 text-xs font-bold text-slate-850 focus:bg-white outline-none transition-all" 
                         placeholder={f.placeholder} 
                         type={f.type} 
                         value={formInputs[f.name] || ''}
@@ -686,13 +737,13 @@ const App: React.FC = () => {
                   </div>
                 ))}
               </div>
-              <button onClick={executeCalculation} disabled={loading} className="w-full mt-14 py-6 rounded-[1.8rem] bg-[#1E3A8A] text-white font-black uppercase tracking-widest shadow-2xl hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50">
+              <button onClick={executeCalculation} disabled={loading} className="w-full mt-14 py-6 rounded-[1.8rem] bg-[#1E3A8A] hover:bg-blue-800 text-white font-black uppercase tracking-widest shadow-2xl hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50">
                 {loading ? 'Consulting 2026 Indices...' : 'Generate Validated Proposal'}
               </button>
             </div>
           )}
 
-          {estimate && (
+          {activeMainView === 'construction' && estimate && (
             <div className="animate-in max-w-5xl mx-auto space-y-8 pb-20 relative z-10">
               <div className="flex justify-end gap-4 no-print flex-wrap relative z-[200]">
                 <button onClick={() => {
@@ -705,9 +756,9 @@ const App: React.FC = () => {
                 </button>
                 <button onClick={handleDownloadInvoice} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-emerald-700 cursor-pointer">Download Invoice</button>
                 <button onClick={() => window.print()} className="bg-[#1E3A8A] text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:bg-blue-800 cursor-pointer">Print Proposal</button>
-                <button onClick={() => {setEstimate(null); setView('estimator');}} className="bg-slate-50 text-slate-800 px-6 py-3 rounded-xl font-black uppercase text-[10px] border border-slate-200 cursor-pointer">New Estimate</button>
+                <button onClick={() => {setEstimate(null); setView('construction'); setConstructionTab('estimator'); setSelectedTask(null);}} className="bg-white text-slate-700 hover:text-slate-900 border border-slate-200 px-6 py-3 rounded-xl font-black uppercase text-[10px] cursor-pointer">New Estimate</button>
               </div>
-              <div className="bg-white p-10 sm:p-20 rounded-[4rem] border shadow-2xl relative overflow-hidden" id="printable-invoice">
+              <div className="bg-white p-10 sm:p-20 rounded-[4rem] border shadow-2xl relative overflow-hidden text-slate-900" id="printable-invoice">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-bl-[10rem] -mr-32 -mt-32 no-print"></div>
                 <div className="flex justify-between items-start mb-16 relative z-10">
                   <div>
@@ -737,15 +788,15 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {view === 'market' && marketPrices?.categories && (
+          {activeMainView === 'construction' && constructionTab === 'market' && marketPrices?.categories && (
             <div className="grid md:grid-cols-2 gap-10 animate-in pb-20">
               {marketPrices.categories.map((cat, i) => (
-                <div key={i} className="bg-white p-12 rounded-[3.5rem] border shadow-sm">
-                  <h3 className="text-xl font-black uppercase text-[#1E3A8A] mb-10 border-b-2 border-slate-50 pb-6">{cat.title}</h3>
+                <div key={i} className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm">
+                  <h3 className="text-xl font-black uppercase text-[#1E3A8A] mb-10 border-b border-slate-100 pb-6">{cat.title}</h3>
                   <div className="space-y-8">
                     {cat.items?.map((item, j) => (
-                      <div key={j} className="flex justify-between items-center group">
-                        <div><p className="text-sm font-black text-slate-800 group-hover:text-[#1E3A8A] transition-colors">{item.brandName}</p><p className="text-[9px] text-slate-400 uppercase font-black tracking-widest mt-1">{item.specificType} {item.category}</p></div>
+                      <div key={j} className="flex justify-between items-center group text-slate-800">
+                        <div><p className="text-sm font-black text-slate-850 group-hover:text-[#1E3A8A] transition-colors">{item.brandName}</p><p className="text-[9px] text-slate-400 uppercase font-black tracking-widest mt-1">{item.specificType} {item.category}</p></div>
                         <div className="text-right"><p className="text-lg font-black text-[#1E3A8A]">₹{item.priceWithGst?.toLocaleString() || '0'}</p><p className="text-[9px] font-bold text-slate-400 uppercase">per {item.unit}</p></div>
                       </div>
                     ))}
@@ -755,24 +806,24 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {view === 'history' && (
+          {activeMainView === 'construction' && constructionTab === 'history' && (
              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 animate-in pb-20">
-               {history.length > 0 ? history.map((h, i) => (
-                 <div key={i} className="bg-white p-10 rounded-[3rem] border shadow-sm cursor-pointer hover:shadow-xl transition-all group" onClick={() => {setEstimate(h.result); setView('estimator');}}>
-                   <span className="text-[9px] font-black uppercase bg-slate-100 px-4 py-1.5 rounded-full text-slate-500">{new Date(h.created_at).toLocaleDateString()}</span>
-                   <h4 className="text-xl font-black uppercase text-slate-800 mt-6 mb-2 group-hover:text-[#1E3A8A]">{h.client_name}</h4>
-                   <div className="pt-6 border-t mt-6 flex justify-between items-center">
-                      <p className="text-lg font-black text-[#1E3A8A]">₹{h.result?.totalEstimatedCost?.toLocaleString() || 'N/A'}</p>
+                {history.length > 0 ? history.map((h, i) => (
+                   <div key={i} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm cursor-pointer hover:border-[#1E3A8A] hover:shadow-xl transition-all group" onClick={() => {setEstimate(h.result); setConstructionTab('estimator');}}>
+                     <span className="text-[9px] font-black uppercase bg-blue-50 px-4 py-1.5 rounded-full text-[#1E3A8A] border border-blue-100">{new Date(h.created_at).toLocaleDateString()}</span>
+                     <h4 className="text-xl font-black uppercase text-slate-800 mt-6 mb-2 group-hover:text-[#1E3A8A] transition-colors">{h.client_name}</h4>
+                     <div className="pt-6 border-t border-slate-100 mt-6 flex justify-between items-center">
+                        <p className="text-lg font-black text-[#1E3A8A]">₹{h.result?.totalEstimatedCost?.toLocaleString() || 'N/A'}</p>
+                     </div>
                    </div>
-                 </div>
-               )) : <div className="col-span-full py-32 text-center opacity-30 text-4xl font-black uppercase tracking-widest">📁 NO RECORDS</div>}
+                )) : <div className="col-span-full py-32 text-center opacity-30 text-4xl font-black uppercase tracking-widest text-slate-400">📁 NO RECORDS</div>}
              </div>
           )}
 
-          {view === 'tax_payments' && <TaxPaymentDashboard />}
+          {activeMainView === 'construction' && constructionTab === 'tax_payments' && <TaxPaymentDashboard displayName={displayName} />}
         </main>
         {/* Footer */}
-        <footer className="bg-white border-t border-slate-200 py-6 px-4 text-center text-[12px] text-slate-500 no-print z-50 relative mt-auto">
+        <footer className="bg-white border-t border-slate-150 py-6 px-4 text-center text-[12px] text-slate-500 no-print z-50 relative mt-auto">
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="font-medium">© 2026 AjayProjects.com | All Rights Reserved.</p>
             <div className="flex gap-6">
