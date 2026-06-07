@@ -248,3 +248,71 @@ export const translateTechSpeak = async (
   }
 };
 
+
+export interface JiraTicketResult {
+  title: string;
+  description: string;
+  technicalDetails: string;
+  acceptanceCriteria: string;
+  suggestedPoints: number;
+  suggestedPriority: string;
+  labels: string[];
+}
+
+export const generateJiraTicket = async (
+  requirements: string,
+  ticketType: 'Task' | 'Story' | 'Bug'
+): Promise<JiraTicketResult> => {
+  const ai = getAI();
+  const prompt = `You are an expert Agile Product Owner / Technical Business Analyst / Scrum Master specializing in developer task planning.
+  Generate a professional, industry-standard Jira Agile ticket of type "${ticketType}" based on the following target user requirement input:
+  
+  Requirement Details:
+  """
+  ${requirements}
+  """
+  
+  Refine and transform these loose user statements into a highly professional Jira ticket:
+  1. A clear, precise, and professional Jira Ticket Title (e.g. "[Backend] Implement JWT validation pipeline").
+  2. An overview / high-level Description establishing why this is needed, following developer workflows.
+  3. A step-by-step Technical Details or implementation guidelines section for the engineer.
+  4. Precise Acceptance Criteria (using bullet points or Gherkin format: Given/When/Then).
+  5. Recommended Story points (standard numbers: 1, 2, 3, 5, 8).
+  6. Recommended priority string (Low, Medium, High, Highest).
+  7. Technical labels for tagging (e.g. ["api-security", "refactoring", "frontend-ui", "bugfix"]).
+  
+  Return the final output adhering strictly to JSON. Ensure the JSON is valid and well-formatted.`;
+
+  try {
+    const response = await fetchWithRetry(() => ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            description: { type: Type.STRING },
+            technicalDetails: { type: Type.STRING },
+            acceptanceCriteria: { type: Type.STRING },
+            suggestedPoints: { type: Type.INTEGER },
+            suggestedPriority: { type: Type.STRING },
+            labels: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            }
+          },
+          required: ["title", "description", "technicalDetails", "acceptanceCriteria", "suggestedPoints", "suggestedPriority", "labels"]
+        }
+      }
+    }));
+    
+    return JSON.parse(response.text || "{}") as JiraTicketResult;
+  } catch (error: any) {
+    console.error("Jira Ticket Generation Error:", error);
+    throw new Error(error.message || "Failed to generate Jira ticket due to overloaded servers. Please try again.");
+  }
+};
+
+
