@@ -25,75 +25,59 @@ interface SavedJiraTicket extends JiraTicketResult {
 const MODULE_MODES: ModeOption[] = [
   {
     id: 'daily_status',
-    name: 'Daily Standup Reporter',
-    description: 'Transform quick dev bullets, raw work logs, or commits into a perfectly structured Standup Update (Yesterday, Today, Blockers).',
-    placeholder: 'e.g. yesterday did API routing layout, today starting db auth middleware, blockers is waiting on DevOps to share Supbase secrets...',
+    name: 'Daily Status Update',
+    description: 'Structure raw logging, commits, or short progress notes into a direct, organic standup report (Yesterday, Today, Blockers).',
+    placeholder: 'e.g., yesterday did stock search index setup, today hooking up the real NSE search state selectors, blockers: waiting on QA key...',
     templates: [
       {
         label: 'Standup: Feature Work',
-        text: 'yesterday: completed the main component design for the stock search bar. today: writing the yahoo finance proxy test cases and connecting state hooks. blockers: none, but waiting for devops to register the environment key.'
+        text: 'yesterday: completed stock search index optimization. today: connecting real NSE symbols with frontend state selectors. blockers: waiting on DevOps for final API environment keys.'
       },
       {
         label: 'Standup: Bug Fixing',
-        text: 'yesterday: tracked down the memory leak causing the browser page freeze when typing queries. fixed it by cleaning up the useEffect resize observer. today: running linter validation across all components and pushing. blockers: none.'
+        text: 'yesterday: fixed profile loader freeze caused by recursive useEffect dependency updates. today: running local linter check and verifying bundle size before deploy. blockers: none.'
+      }
+    ]
+  },
+  {
+    id: 'email_draft',
+    name: 'Email Draft',
+    description: 'Transform quick alerts, delay warnings, or help signals into direct, carefully structured developer emails.',
+    placeholder: 'e.g., direct DB is down since 2pm today because we hit connection pool limit, someone from DevOps reboot please...',
+    templates: [
+      {
+        label: 'Alert: Staging DB Downtime',
+        text: 'staging server is throwing postgres timeout errors since 2 PM. looks like we hit the database connection pool ceiling. can devops team force restart the container instance so we can proceed with release test?'
+      },
+      {
+        label: 'Request: Design assets',
+        text: 'asking UI team if we can get the high-res SVG assets for the stock dashboard. current png exports are looking blurred on retina displays. need them by Friday.'
       }
     ]
   },
   {
     id: 'jira_comment',
-    name: 'Professional Jira Commenter',
-    description: 'Elevate raw developer opinions, technical rebuttals, or code explanations into highly diplomatic, clear JIRA comment briefs.',
-    placeholder: 'e.g. you are wrong, frontend breaks because you sent string instead of integer in payload, read my schema...',
+    name: 'Comments to Jira Task',
+    description: 'Polish developer responses, pushbacks, or error logs into constructive, clear, and task-focused comments.',
+    placeholder: 'e.g., you gave me the wrong database schemas, payload expects number but API returns string, please fix...',
     templates: [
       {
-        label: 'Pushback: Schema Mismatch',
-        text: 'the dashboard is crashing on load because the backend response sends string instead of integer in the pricing key. you need to update the serializer before I can sync my card. check line 104 in api.js.'
+        label: 'Technical: API Payload Mismatch',
+        text: 'the dashboard loader is failing because the response is returning pricing as string instead of a float number. please update the backend model serializer so it matches the frontend schema.'
       },
       {
-        label: 'Explanation: Delay in Delivery',
-        text: 'this story is delayed by 2 days because the documentation on their third-party map gateway is completely outdated and we had to write custom fetch code to parse the lat longs. already resolved but waiting for qa approval.'
-      }
-    ]
-  },
-  {
-    id: 'email_conv',
-    name: 'Developer Email Polisher',
-    description: 'Polish informal dev briefs, critical alerts, team help requests, or downtime notifications into executive-ready corporate emails.',
-    placeholder: 'e.g. hey guys direct db is down since 2pm, our supbase connection pool hit max limit, need devops team to reboot the staging database right now...',
-    templates: [
-      {
-        label: 'Alert: Staging Server Down',
-        text: 'hey team, supabase is throwing connection timeout errors since 2 PM today. we hit the maximum connection limit on the staging pool. can someone from devops look into restarting the staging instance database fast? it is blocking our current release testing.'
-      },
-      {
-        label: 'Request: Cross-Team API access',
-        text: 'hey finance team, we need the live sandboxed upi api credentials to build the payment flow logic for our online customer registration. the current mock key you shared is expired. please share the new client id.'
-      }
-    ]
-  },
-  {
-    id: 'tech_to_business',
-    name: 'Tech Speak ➔ Business Worth',
-    description: 'Translate pure tech definitions, backend jargon, or optimization work into strategic business value for Product Managers & Directors.',
-    placeholder: 'e.g. spent 5 hours refactoring index query cache to reduce response from 3s to 200ms using redis indexing...',
-    templates: [
-      {
-        label: 'Value: Query Optimization',
-        text: 'reindexed the core PostgreSQL catalog tables and implemented a lazy-loading Redis query cache to bring API response down from 3 seconds to 150 milliseconds.'
-      },
-      {
-        label: 'Value: Security Refactoring',
-        text: 'migrated all localstorage critical API session payloads over to HttpOnly secure cookies and enabled double-hashed token hashing filters for incoming route gateways.'
+        label: 'QA Update: Stale Build Check',
+        text: 'the issue reported with state refresh is not reproducible on localhost. looks like QA is testing against a cached stale build. please clear local storage and try validating again.'
       }
     ]
   }
 ];
 
 const TONE_OPTIONS: ToneOption[] = [
-  { id: 'diplomatic', name: 'Diplomatic & Polished', emoji: '🤵' },
-  { id: 'direct', name: 'Direct & Professional', emoji: '⚔️' },
-  { id: 'collaborative', name: 'Warm & Team-Centric', emoji: '🤝' },
-  { id: 'eli5', name: 'ELI5 (Extreme Simplicity)', emoji: '👶' }
+  { id: 'simple_english', name: 'Simple English', emoji: '💡' },
+  { id: 'functional_words', name: 'Functional Words', emoji: '💼' },
+  { id: 'more_technical', name: 'More Technical', emoji: '⚙️' },
+  { id: 'hr_related', name: 'HR Related / Polite', emoji: '🤝' }
 ];
 
 interface CorporateTranslatorProps {
@@ -107,7 +91,7 @@ const CorporateTranslator: React.FC<CorporateTranslatorProps> = ({ displayName }
   // TRANSLATOR TAB STATES
   const [text, setText] = useState('');
   const [mode, setMode] = useState('daily_status');
-  const [tone, setTone] = useState('diplomatic');
+  const [tone, setTone] = useState('simple_english');
   const [translated, setTranslated] = useState('');
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
