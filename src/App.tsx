@@ -437,12 +437,16 @@ const App: React.FC = () => {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => { 
+    supabase.auth.getSession().then(({ data }) => { 
+      const session = data?.session;
       if (session?.user) {
         setUser(session.user);
         fetchUserProfile(session.user.id);
       }
+    }).catch((err) => {
+      console.warn("Auth session check skipped:", err);
     });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) { 
         setUser(session.user); 
@@ -453,6 +457,7 @@ const App: React.FC = () => {
         setUserProfile(null);
       }
     });
+
     getRawMaterialPriceList().then(data => {
       if (data && data.categories) {
         setMarketPrices(data);
@@ -460,6 +465,8 @@ const App: React.FC = () => {
         const text = segments.join(' • ');
         setTickerText(`${text} • ${text}`);
       }
+    }).catch((err) => {
+      console.warn("Market price index offline:", err);
     });
     return () => subscription.unsubscribe();
   }, []);

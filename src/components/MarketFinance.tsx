@@ -752,30 +752,17 @@ const fetchWithProxy = async (url: string) => {
   try {
     const localProxyUrl = `/api/yahoo?url=${encodeURIComponent(url)}`;
     const res = await fetch(localProxyUrl);
-    if (res.ok) return await res.json();
-  } catch (err) {
-    console.warn("Local proxy fetch failed, trying direct fetch for url: " + url, err);
-  }
-
-  try {
-    const res = await fetch(url);
-    if (res.ok) return await res.json();
-  } catch (err) {
-    console.warn("Direct fetch also failed, trying backup public CORS proxy", err);
-  }
-
-  try {
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const res = await fetch(proxyUrl);
     if (res.ok) {
       const data = await res.json();
-      return JSON.parse(data.contents);
+      if (data && !data.error && data.chart?.result?.length) {
+        return data;
+      }
     }
   } catch (err) {
-    console.warn("Backup public proxy failed, falling back to simulated data feed", err);
+    // Avoid console spam or unhandled network errors
   }
 
-  // Gracefully return dynamic visual simulation stream
+  // Gracefully return dynamic visual simulation stream without any client-side CORS failures
   return generateSimulatedYahooData(url);
 };
 

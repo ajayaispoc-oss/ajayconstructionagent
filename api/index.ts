@@ -30,7 +30,7 @@ function getGeminiClient(): GoogleGenAI {
 
 async function callGeminiWithRetry<T>(
   fn: (ai: GoogleGenAI, model: string) => Promise<T>,
-  models = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.8-flash"]
+  models = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
 ): Promise<T> {
   let lastError: any = null;
   const ai = getGeminiClient();
@@ -50,7 +50,7 @@ async function callGeminiWithRetry<T>(
 
       if (!isQuotaOrOverloaded) {
         try {
-          await new Promise((r) => setTimeout(r, 500));
+          await new Promise((r) => setTimeout(r, 400));
           return await fn(ai, model);
         } catch (retryErr: any) {
           lastError = retryErr;
@@ -64,7 +64,7 @@ async function callGeminiWithRetry<T>(
 
 const apiRouter = express.Router();
 
-// 1. Yahoo Finance CORS Proxy Endpoint
+// 1. Yahoo Finance CORS Proxy Endpoint with strict timeout
 apiRouter.get("/yahoo", async (req, res) => {
   try {
     const url = req.query.url;
@@ -76,13 +76,17 @@ apiRouter.get("/yahoo", async (req, res) => {
       return res.status(400).json({ error: "Unauthorized target URL" });
     }
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+
     const response = await fetch(url, {
+      signal: controller.signal,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Accept": "application/json",
         "Referer": "https://finance.yahoo.com/",
       },
-    });
+    }).finally(() => clearTimeout(timer));
 
     if (!response.ok) {
       return res.status(response.status).json({ error: `Yahoo API returned error status ${response.status}` });
@@ -91,12 +95,33 @@ apiRouter.get("/yahoo", async (req, res) => {
     const data = await response.json();
     res.json(data);
   } catch (error: any) {
-    console.error("Error in yahoo proxy:", error);
     res.status(500).json({ error: error.message || "Failed to fetch stock data from Yahoo Finance" });
   }
 });
 
-// 2. Health Check Endpoint
+// 2. Server-side notification webhook dispatcher (avoids browser CORS & ad-blocker blocks)
+apiRouter.post("/notify", async (req, res) => {
+  try {
+    const payload = req.body;
+    const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxzYXyzkiJnih5MMWsUx8HV5F2je8A8zw6mS96o91EGCXKoU2gB1rJdsf0rSp9HMqyK/exec";
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+
+    fetch(WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer)).catch(() => {});
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+// 3. Health Check Endpoint
 apiRouter.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });

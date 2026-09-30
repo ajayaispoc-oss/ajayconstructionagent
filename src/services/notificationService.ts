@@ -44,21 +44,18 @@ export const notifyCloud = async (event: CloudEvent, payload: any) => {
     "FullData": JSON.stringify(result && Object.keys(result).length > 0 ? result : payload)
   };
 
-  const WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxzYXyzkiJnih5MMWsUx8HV5F2je8A8zw6mS96o91EGCXKoU2gB1rJdsf0rSp9HMqyK/exec";
-
-  console.log('Email Payload:', webhookPayload);
-
-  // Fire-and-forget for the webhook
-  fetch(WEBHOOK_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    cache: 'no-cache',
-    keepalive: true,
-    headers: {
-      'Content-Type': 'text/plain'
-    },
-    body: JSON.stringify(webhookPayload)
-  }).catch(() => {});
+  // Fire-and-forget through backend proxy to avoid client CORS / adblocker 'Failed to fetch'
+  try {
+    fetch('/api/notify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(webhookPayload)
+    }).catch(() => {});
+  } catch (e) {
+    // Graceful ignore
+  }
 
   // 3. DATABASE FIX: Backup sync to Supabase with strict mapping
   try {
